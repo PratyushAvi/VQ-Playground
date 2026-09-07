@@ -19,6 +19,25 @@ tools/                     Phase 0 harness: fixture generation, headless runs, p
 web/                       (Phase 1) the playground UI
 ```
 
+## Getting the fork
+
+`vendor/vq-bench` is not tracked by this repo yet — making it a submodule needs a fork
+URL on your own account. Its two Phase 0 commits live in its own git history. To
+recreate it from scratch:
+
+```sh
+git clone https://github.com/pinecone-io/vq-bench vendor/vq-bench
+cd vendor/vq-bench && git remote rename origin upstream && git checkout -b playground
+```
+
+then re-apply the two changes described under [Fork changes](#fork-changes). Once you
+have pushed your fork:
+
+```sh
+cd vendor/vq-bench && git remote add origin git@github.com:<you>/vq-bench.git && git push -u origin playground
+cd ../.. && git submodule add git@github.com:<you>/vq-bench.git vendor/vq-bench
+```
+
 ## Verifying Phase 0
 
 ```sh
