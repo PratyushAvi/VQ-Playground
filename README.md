@@ -6,9 +6,10 @@ pick a quantizer, set its parameters, point it at vectors, and run it client-sid
 All quantization behavior comes from vq-bench itself, compiled to WebAssembly. No
 quantizer or metric logic is reimplemented in JavaScript.
 
-**Status: Phase 2 complete.** vq-bench runs in WASM, its metrics match the native `vqb`
-CLI on identical inputs, and the browser playground has a live-validated config editor,
-loads your own `.h5` files, and keeps a local run history.
+**Status: Phase 2 complete, plus custom pipelines.** vq-bench runs in WASM, its metrics
+match the native `vqb` CLI on identical inputs, and the browser playground has a
+live-validated config editor, loads your own `.h5` files, keeps a local run history, and
+lets you compose your own quantizer from vq-bench's primitives.
 
 ## Layout
 
@@ -69,6 +70,35 @@ exact top-L is brute-forced by vq-bench through the WASM boundary, never in JS.
 Runs are kept in IndexedDB on your device: the config, the scores, and how long it took.
 Never the vectors, and never the file.
 
+### Composing your own quantizer
+
+The **Compose** tab chains vq-bench's primitives into a pipeline of your own — no
+recompile, and it runs offline like everything else:
+
+```json
+{ "name": "my-quantizer", "stages": [
+    { "name": "center" },
+    { "name": "normalize" },
+    { "name": "random_hadamard" },
+    { "name": "cast_angular", "b": 4 }
+] }
+```
+
+That chain *is* `e_rabitq`, and it reproduces it exactly — same recall, same MSE. So do
+`minmax`, `rabitq` and `itq_asym` when composed from their documented stages, which is the
+check that the builder really runs vq-bench's primitives rather than approximating them.
+
+Every seeded stage takes the run's seed by default; give a stage its own `seed` when a
+chain needs two *different* random rotations. Stage params, and each stage's compatibility
+with the one before it, are validated by vq-bench through `Pipeline::new`.
+
+Only linear chains are composable. Splitters (`SegmentSplit`) fan out into branch
+pipelines, which a linear chain cannot express — PQ and OPQ remain available as built-in
+families.
+
+Note that vq-bench checks *dimensions*, not sensibility: a chain with no rounder, or with
+two, will run. The builder warns about the first rather than blocking it.
+
 To check the UI end to end (needs `npm run dev` in another terminal):
 
 ```sh
@@ -108,6 +138,7 @@ Four exported functions, kept deliberately small so UI work rarely needs a Rust 
 | `validate_config(json, dim)` | the dry run: names, params, values -- computes nothing |
 | `run(json, base, eval, dim, candidates, cand_width)` | fit, encode, score, reconstruct |
 | `top_neighbors(base, eval, dim, l, on_progress)` | exact top-L ground truth, with progress |
+| `list_primitives()` | the composable stages (19 today) |
 
 Config JSON matches the CLI's, minus `datasets` (the browser passes vectors directly).
 An array-valued param sweeps, as upstream: `{"name": "minmax", "b": [2, 4, 6]}` is three runs.
@@ -122,7 +153,10 @@ Kept minimal and additive so rebasing onto upstream stays cheap:
 2. **`TopL` / `tile_rows` → `src/candidates.rs`**, exported as `pub mod candidates` with a
    `top_neighbors_with_progress` entry point. Exact top-L search was CLI-only, so a browser
    had no way to build ground truth for a file that ships none.
-3. **faer without its `rayon` feature.** That feature pulls `spindle` → `atomic-wait`, which
+3. **`src/primitives/registry.rs`**, exported as `pub mod registry`. The primitive catalog
+   reports what exists but not how to *make* one, so a pipeline could not be built from
+   config. This adds a key → constructor row per stage, mirroring `QuantizerSpec`.
+4. **faer without its `rayon` feature.** That feature pulls `spindle` → `atomic-wait`, which
    has no `wasm32-unknown-unknown` backend. All other faer defaults are kept, so native
    builds are unaffected.
 

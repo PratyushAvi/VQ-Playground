@@ -9,6 +9,22 @@ export type Quantizer = {
   describe: string;
 };
 
+/** One composable pipeline stage, as reported by `list_primitives()`. */
+export type PrimitiveSpec = {
+  key: string;
+  display: string;
+  params: string[];
+  describe: string;
+};
+
+/** One stage in a pipeline under construction. Values are the raw input text. */
+export type Stage = {
+  /** Stable across reorders, so React keys survive drag and drop. */
+  id: number;
+  key: string;
+  params: Record<string, string>;
+};
+
 /** One metric, as reported by `list_metrics()`. */
 export type Metric = {
   name: string;

@@ -15,6 +15,20 @@ export type ParamShape =
   | { kind: "text"; fallback: string; hint: string };
 
 const SHAPES: Record<string, ParamShape> = {
+  // Primitive params. `lo`/`hi`/`scale`/`offset` are floats, so they stay text
+  // rather than pretending to be integers.
+  lo: { kind: "text", fallback: "0", hint: "range floor" },
+  hi: { kind: "text", fallback: "1", hint: "range ceiling" },
+  scale: { kind: "text", fallback: "1", hint: "multiplier" },
+  offset: { kind: "text", fallback: "0", hint: "addend" },
+  dim: { kind: "int", min: 1, fallback: 128, hint: "output dimensions" },
+  seed: { kind: "int", min: 0, fallback: 1, hint: "overrides the run seed" },
+  mode: {
+    kind: "choice",
+    options: ["plain", "mse", "unbiased"],
+    fallback: "plain",
+    hint: "dequant scale",
+  },
   // 1..=8: the bit-packer's field width is one byte (util/coding.rs MAX_BITS).
   b: { kind: "int", min: 1, max: 8, fallback: 4, hint: "bits per dimension" },
   centroids: { kind: "int", min: 1, fallback: 256, hint: "codewords per segment" },
@@ -60,6 +74,11 @@ export function toConfigValue(param: string, raw: string): unknown {
     // coercing it to NaN here.
     if (numbers.some(Number.isNaN)) return text;
     return numbers.length === 1 ? numbers[0] : numbers;
+  }
+  if (shape.kind === "text") {
+    // A bare number in a float field should reach vq-bench as a number.
+    const asNumber = Number(text);
+    if (text !== "" && !Number.isNaN(asNumber)) return asNumber;
   }
   return text;
 }

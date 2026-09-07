@@ -120,6 +120,55 @@ await page.locator('input[type="file"]').setInputFiles("test/data/wrong.h5");
 await page.waitForSelector("text=/unrecognized layout/", { timeout: 60000 });
 check("an unrecognized layout is refused with a clear reason", true, "");
 
+// --- Custom pipelines ---
+// Back to the sample dataset, so the composed chain is compared against the
+// built-in on identical vectors.
+await page.locator("text=/back to the sample dataset/").click();
+await page.waitForTimeout(200);
+
+await page.getByRole("button", { name: "Built-in" }).click();
+await page.selectOption("select", "minmax");
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: /^run$/i }).click();
+await page.waitForSelector('tbody tr:has-text("MinMax (b=4)")', { timeout: 120000 });
+const builtinRow = await page.locator("tbody tr").first().innerText();
+
+// The same quantizer, composed by hand from primitives.
+await page.getByRole("button", { name: "Compose" }).click();
+await page.waitForSelector("text=/An empty pipeline/", { timeout: 10000 });
+await page.locator("select").last().selectOption("minmax");
+await page.waitForTimeout(150);
+await page.locator("select").last().selectOption("cast_uint");
+await page.waitForTimeout(200);
+check("stages can be added", await page.locator("ol li").count() === 2, "expected 2 stages");
+
+await page.getByRole("button", { name: /^run$/i }).click();
+await page.waitForSelector('tbody tr:has-text("custom")', { timeout: 120000 });
+const composedRow = await page.locator("tbody tr").first().innerText();
+
+// Same numbers, different label: proof the chain runs vq-bench's own stages.
+const numbers = (row) => row.replace(/\s+/g, " ").trim().split(" ").filter((t) => /^[\d.e-]+$/.test(t));
+check(
+  "a composed pipeline reproduces the built-in exactly",
+  numbers(builtinRow).join() === numbers(composedRow).join(),
+  `built-in ${numbers(builtinRow).join()} vs composed ${numbers(composedRow).join()}`,
+);
+
+// A bad stage param is refused, in vq-bench's own words. (Dim compatibility is
+// all `Pipeline::new` checks -- a chain with no rounder, or two, is unusual but
+// genuinely runnable, so the UI hints rather than blocking.)
+const bits = page.locator("ol li").last().locator("input");
+await bits.fill("99");
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: /^run$/i }).click();
+await page.waitForSelector("text=/Config rejected/", { timeout: 60000 });
+const stageError = await page.locator("li.font-mono").first().innerText();
+check(
+  "a bad stage param names the stage and the reason",
+  /stage 1/.test(stageError) && /b must be in 1\.\.=8/.test(stageError),
+  stageError,
+);
+
 check("no console or page errors", problems.length === 0, problems.join("; "));
 
 await browser.close();

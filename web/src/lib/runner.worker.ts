@@ -5,6 +5,7 @@ import * as Comlink from "comlink";
 import init, {
   list_quantizers,
   list_metrics,
+  list_primitives,
   validate_config,
   run,
   top_neighbors,
@@ -25,6 +26,11 @@ const api = {
   async listMetrics() {
     await ready;
     return JSON.parse(list_metrics());
+  },
+
+  async listPrimitives() {
+    await ready;
+    return JSON.parse(list_primitives());
   },
 
   async validate(config: string, dim: number): Promise<ValidationResponse> {

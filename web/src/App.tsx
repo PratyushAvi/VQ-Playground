@@ -11,6 +11,7 @@ import * as Comlink from "comlink";
 import { ConfigEditor } from "./components/ConfigEditor";
 import { DatasetPicker } from "./components/DatasetPicker";
 import { MethodPicker } from "./components/MethodPicker";
+import { PipelineBuilder } from "./components/PipelineBuilder";
 import { ResultsTable } from "./components/ResultsTable";
 import { RunHistory } from "./components/RunHistory";
 import { SAMPLE_DATASET, loadSampleDataset } from "./lib/dataset";
@@ -18,7 +19,7 @@ import { loadH5, type LoadOptions, type LoadedFile } from "./lib/h5";
 import { clearRuns, deleteRun, listRuns, saveRun, type RunRecord } from "./lib/history";
 import { defaultValue, toConfigValue } from "./lib/params";
 import { runner } from "./lib/runner";
-import type { Dataset, MethodResult, Quantizer } from "./lib/types";
+import type { Dataset, MethodResult, PrimitiveSpec, Quantizer, Stage } from "./lib/types";
 
 const DEFAULT_METRICS = ["recall", "mse_score", "mse_recon"];
 const DEFAULT_KS = [1, 10];
@@ -29,6 +30,9 @@ const DEFAULT_LOAD: LoadOptions = { nBase: 10000, nEval: 100, candWidth: 100, se
 
 export default function App() {
   const [quantizers, setQuantizers] = useState<Quantizer[]>([]);
+  const [primitives, setPrimitives] = useState<PrimitiveSpec[]>([]);
+  const [mode, setMode] = useState<"family" | "custom">("family");
+  const [stages, setStages] = useState<Stage[]>([]);
   const [sample, setSample] = useState<Dataset | null>(null);
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
   const [loadOptions, setLoadOptions] = useState<LoadOptions>(DEFAULT_LOAD);
@@ -49,10 +53,16 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([runner().listQuantizers(), loadSampleDataset(), listRuns()])
-      .then(([families, data, saved]) => {
+    Promise.all([
+      runner().listQuantizers(),
+      runner().listPrimitives(),
+      loadSampleDataset(),
+      listRuns(),
+    ])
+      .then(([families, stageKinds, data, saved]) => {
         if (cancelled) return;
         setQuantizers(families);
+        setPrimitives(stageKinds);
         setSample(data);
         setRuns(saved);
       })
@@ -75,12 +85,33 @@ export default function App() {
     setElapsed(null);
   }, [selected, quantizers]);
 
-  /** The config the form describes. */
+  useEffect(() => {
+    setResults(null);
+    setErrors([]);
+    setElapsed(null);
+  }, [mode]);
+
+  /** The config the form describes -- a built-in family, or a composed chain. */
   const formConfig = useMemo(() => {
-    const method: Record<string, unknown> = { name: selected };
-    for (const [param, raw] of Object.entries(params)) {
-      const value = toConfigValue(param, raw);
-      if (value !== undefined) method[param] = value;
+    const method: Record<string, unknown> =
+      mode === "custom"
+        ? {
+            name: "custom",
+            stages: stages.map((stage) => {
+              const out: Record<string, unknown> = { name: stage.key };
+              for (const [param, raw] of Object.entries(stage.params)) {
+                const value = toConfigValue(param, raw);
+                if (value !== undefined) out[param] = value;
+              }
+              return out;
+            }),
+          }
+        : { name: selected };
+    if (mode === "family") {
+      for (const [param, raw] of Object.entries(params)) {
+        const value = toConfigValue(param, raw);
+        if (value !== undefined) method[param] = value;
+      }
     }
     return {
       methods: [method],
@@ -89,7 +120,7 @@ export default function App() {
       seed: SEED,
       n_reconstruct: 200,
     };
-  }, [selected, params]);
+  }, [mode, selected, params, stages]);
 
   // The form drives the editor. `configText` is what actually runs, so hand
   // edits survive until the form changes again.
@@ -198,7 +229,25 @@ export default function App() {
         <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
           <div className="space-y-6">
             <Panel title="Quantizer">
-              {ready ? (
+              <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-0.5">
+                {(["family", "custom"] as const).map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => setMode(option)}
+                    className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                      mode === option
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {option === "family" ? "Built-in" : "Compose"}
+                  </button>
+                ))}
+              </div>
+
+              {!ready ? (
+                <p className="text-sm text-slate-500">Loading…</p>
+              ) : mode === "family" ? (
                 <MethodPicker
                   quantizers={quantizers}
                   selected={selected}
@@ -209,7 +258,11 @@ export default function App() {
                   }
                 />
               ) : (
-                <p className="text-sm text-slate-500">Loading…</p>
+                <PipelineBuilder
+                  primitives={primitives}
+                  stages={stages}
+                  onChange={setStages}
+                />
               )}
             </Panel>
 
