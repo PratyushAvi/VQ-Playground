@@ -44,7 +44,7 @@ cd ../.. && git submodule add git@github.com:<you>/vq-bench.git vendor/vq-bench
 ## Running the playground
 
 ```sh
-./tools/build_wasm.sh          # build the wasm module into web/src/wasm/
+./tools/build_wasm.sh          # wasm module + sample dataset into web/
 cd web && npm install && npm run dev
 ```
 
