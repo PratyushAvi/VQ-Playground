@@ -1,0 +1,12 @@
+{
+  // rust-analyzer needs the fork's workspace root, not the repo root.
+  "rust-analyzer.linkedProjects": ["vendor/vq-bench/Cargo.toml"],
+  // The wasm crate only type-checks meaningfully for its real target.
+  "rust-analyzer.cargo.target": "wasm32-unknown-unknown",
+  "files.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/pkg": true,
+    "**/pkg-web": true
+  }
+}
