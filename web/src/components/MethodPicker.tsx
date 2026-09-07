@@ -26,7 +26,6 @@ export function MethodPicker({
   return (
     <div className="space-y-4">
       <label className="block">
-        <span className="mb-1 block text-sm font-medium text-slate-700">Quantizer</span>
         <select
           value={selected}
           onChange={(e) => onSelect(e.target.value)}

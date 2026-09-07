@@ -1,39 +1,60 @@
-// The Phase 1 playground: pick a quantizer, set its params, run it on the
-// bundled sample dataset, read the scores. Everything runs locally -- the wasm
-// module and the dataset are both served from this origin.
+// The playground: build a config (by form or by hand), point it at a dataset,
+// run it locally, keep the result.
+//
+// The form and the JSON editor are two views of one config. Editing the form
+// rewrites the JSON; editing the JSON leaves the form alone, since arbitrary
+// JSON has no faithful form representation.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import * as Comlink from "comlink";
 
+import { ConfigEditor } from "./components/ConfigEditor";
+import { DatasetPicker } from "./components/DatasetPicker";
 import { MethodPicker } from "./components/MethodPicker";
 import { ResultsTable } from "./components/ResultsTable";
+import { RunHistory } from "./components/RunHistory";
 import { SAMPLE_DATASET, loadSampleDataset } from "./lib/dataset";
+import { loadH5, type LoadOptions, type LoadedFile } from "./lib/h5";
+import { clearRuns, deleteRun, listRuns, saveRun, type RunRecord } from "./lib/history";
 import { defaultValue, toConfigValue } from "./lib/params";
 import { runner } from "./lib/runner";
 import type { Dataset, MethodResult, Quantizer } from "./lib/types";
 
-/** Metrics Phase 1 reports. Kept short so the table stays readable. */
-const METRICS = ["recall", "mse_score", "mse_recon"];
-const K_VALUES = [1, 10];
+const DEFAULT_METRICS = ["recall", "mse_score", "mse_recon"];
+const DEFAULT_KS = [1, 10];
 const SEED = 1;
+
+/** Small by default: a phone could be the runtime, and a big base is slow. */
+const DEFAULT_LOAD: LoadOptions = { nBase: 10000, nEval: 100, candWidth: 100, seed: SEED };
 
 export default function App() {
   const [quantizers, setQuantizers] = useState<Quantizer[]>([]);
-  const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [sample, setSample] = useState<Dataset | null>(null);
+  const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
+  const [loadOptions, setLoadOptions] = useState<LoadOptions>(DEFAULT_LOAD);
+  const [loadingStage, setLoadingStage] = useState<string | null>(null);
+
   const [selected, setSelected] = useState("minmax");
   const [params, setParams] = useState<Record<string, string>>({});
+  const [configText, setConfigText] = useState("");
+
   const [results, setResults] = useState<MethodResult[] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState<number | null>(null);
+  const [runs, setRuns] = useState<RunRecord[]>([]);
 
-  // Load the registry and the sample dataset once, in parallel.
+  const dataset = loadedFile?.dataset ?? sample;
+  const datasetName = loadedFile ? "local file" : SAMPLE_DATASET.name;
+
   useEffect(() => {
     let cancelled = false;
-    Promise.all([runner().listQuantizers(), loadSampleDataset()])
-      .then(([families, data]) => {
+    Promise.all([runner().listQuantizers(), loadSampleDataset(), listRuns()])
+      .then(([families, data, saved]) => {
         if (cancelled) return;
         setQuantizers(families);
-        setDataset(data);
+        setSample(data);
+        setRuns(saved);
       })
       .catch((err: unknown) => {
         if (!cancelled) setErrors([`startup failed: ${String(err)}`]);
@@ -43,9 +64,8 @@ export default function App() {
     };
   }, []);
 
-  // Reset params to the family's defaults whenever the selection changes, and
-  // drop the previous results -- they describe the old quantizer, so leaving
-  // them up would label another method's numbers with this one's name.
+  // Reset params when the family changes, and drop results that described the
+  // previous quantizer.
   useEffect(() => {
     const family = quantizers.find((q) => q.key === selected);
     if (!family) return;
@@ -55,7 +75,8 @@ export default function App() {
     setElapsed(null);
   }, [selected, quantizers]);
 
-  const config = useMemo(() => {
+  /** The config the form describes. */
+  const formConfig = useMemo(() => {
     const method: Record<string, unknown> = { name: selected };
     for (const [param, raw] of Object.entries(params)) {
       const value = toConfigValue(param, raw);
@@ -63,12 +84,65 @@ export default function App() {
     }
     return {
       methods: [method],
-      metrics: METRICS,
-      k: K_VALUES,
+      metrics: DEFAULT_METRICS,
+      k: DEFAULT_KS,
       seed: SEED,
       n_reconstruct: 200,
     };
   }, [selected, params]);
+
+  // The form drives the editor. `configText` is what actually runs, so hand
+  // edits survive until the form changes again.
+  useEffect(() => {
+    setConfigText(JSON.stringify(formConfig, null, 2));
+  }, [formConfig]);
+
+  const validate = useCallback(
+    async (config: string): Promise<string[]> => {
+      if (!dataset) return [];
+      try {
+        const check = await runner().validate(config, dataset.dim);
+        return check.ok ? [] : check.errors;
+      } catch (err: unknown) {
+        return [String(err)];
+      }
+    },
+    [dataset],
+  );
+
+  const onFile = useCallback(
+    async (file: File) => {
+      setErrors([]);
+      setResults(null);
+      try {
+        const loaded = await loadH5(
+          file,
+          {
+            ...loadOptions,
+            onProgress: (stage, done, total) =>
+              setLoadingStage(total > 1 ? `${stage} ${done}/${total}` : stage),
+          },
+          // Ground truth is computed by vq-bench in the worker, never in JS.
+          (base, evalQueries, dim, l) =>
+            runner().topNeighbors(
+              base,
+              evalQueries,
+              dim,
+              l,
+              Comlink.proxy((done: number, total: number) =>
+                setLoadingStage(`ground truth ${done}/${total}`),
+              ),
+            ) as Promise<Uint32Array>,
+        );
+        setLoadedFile(loaded);
+      } catch (err: unknown) {
+        setErrors([`could not read ${file.name}: ${(err as Error).message ?? String(err)}`]);
+      } finally {
+        setLoadingStage(null);
+      }
+    },
+    [loadOptions],
+  );
 
   const onRun = useCallback(async () => {
     if (!dataset) return;
@@ -76,35 +150,44 @@ export default function App() {
     setErrors([]);
     const started = performance.now();
     try {
-      const text = JSON.stringify(config);
-      // Dry-run first: catches a bad param before spending time on a run, and
-      // reports it in vq-bench's own words.
-      const check = await runner().validate(text, dataset.dim);
+      const check = await runner().validate(configText, dataset.dim);
       if (!check.ok) {
         setErrors(check.errors);
         setResults(null);
         return;
       }
-      const out = await runner().run(text, dataset);
+      const out = await runner().run(configText, dataset);
       if (!out.ok) {
         setErrors(out.errors);
         setResults(null);
         return;
       }
+      const seconds = (performance.now() - started) / 1000;
       setResults(out.results);
-      setElapsed((performance.now() - started) / 1000);
+      setElapsed(seconds);
+
+      // Only the scores and the config that made them -- never the vectors.
+      const record: RunRecord = {
+        id: Date.now(),
+        config: configText,
+        dataset: datasetName,
+        results: out.results,
+        elapsedSeconds: seconds,
+      };
+      await saveRun(record);
+      setRuns(await listRuns());
     } catch (err: unknown) {
       setErrors([String(err)]);
     } finally {
       setBusy(false);
     }
-  }, [config, dataset]);
+  }, [configText, dataset, datasetName]);
 
   const ready = quantizers.length > 0 && dataset !== null;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-5xl px-6 py-10">
+      <div className="mx-auto max-w-6xl px-6 py-10">
         <header className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">VQ-bench Playground</h1>
           <p className="mt-1 text-sm text-slate-600">
@@ -112,10 +195,10 @@ export default function App() {
           </p>
         </header>
 
-        <div className="grid gap-8 md:grid-cols-[20rem_1fr]">
-          <section className="rounded-lg border border-slate-200 bg-white p-5">
-            {ready ? (
-              <>
+        <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+          <div className="space-y-6">
+            <Panel title="Quantizer">
+              {ready ? (
                 <MethodPicker
                   quantizers={quantizers}
                   selected={selected}
@@ -125,38 +208,67 @@ export default function App() {
                     setParams((prev) => ({ ...prev, [param]: value }))
                   }
                 />
+              ) : (
+                <p className="text-sm text-slate-500">Loading…</p>
+              )}
+            </Panel>
 
-                <div className="mt-6 border-t border-slate-100 pt-4">
-                  <p className="text-xs text-slate-500">
-                    {SAMPLE_DATASET.name} — {SAMPLE_DATASET.describe}
-                  </p>
-                </div>
+            <Panel title="Dataset">
+              <DatasetPicker
+                sampleName={SAMPLE_DATASET.name}
+                sampleDescribe={SAMPLE_DATASET.describe}
+                loaded={loadedFile}
+                options={loadOptions}
+                busy={loadingStage}
+                onOptionsChange={setLoadOptions}
+                onFile={onFile}
+                onUseSample={() => setLoadedFile(null)}
+              />
+            </Panel>
 
-                <button
-                  onClick={onRun}
-                  disabled={busy}
-                  className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium
-                             text-white hover:bg-slate-700 disabled:cursor-not-allowed
-                             disabled:bg-slate-300"
-                >
-                  {busy ? "Running…" : "Run"}
-                </button>
-              </>
-            ) : (
-              <p className="text-sm text-slate-500">Loading…</p>
-            )}
-          </section>
+            <Panel title="History">
+              <RunHistory
+                runs={runs}
+                onRestore={(run) => {
+                  setConfigText(run.config);
+                  setResults(run.results);
+                  setElapsed(run.elapsedSeconds);
+                  setErrors([]);
+                }}
+                onDelete={async (id) => {
+                  await deleteRun(id);
+                  setRuns(await listRuns());
+                }}
+                onClear={async () => {
+                  await clearRuns();
+                  setRuns([]);
+                }}
+              />
+            </Panel>
+          </div>
 
-          {/* min-w-0 lets this grid column shrink below its content width, which
-              is what makes the results table's own overflow-x-auto engage
-              instead of the table pushing the page wide. */}
-          <section className="min-w-0 space-y-4">
+          {/* min-w-0 lets this column shrink below its content, so the results
+              table scrolls inside its card instead of widening the page. */}
+          <div className="min-w-0 space-y-6">
+            <Panel title="Config">
+              <ConfigEditor value={configText} onChange={setConfigText} validate={validate} />
+              <button
+                onClick={onRun}
+                disabled={busy || !ready}
+                className="mt-3 w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium
+                           text-white hover:bg-slate-700 disabled:cursor-not-allowed
+                           disabled:bg-slate-300"
+              >
+                {busy ? "Running…" : "Run"}
+              </button>
+            </Panel>
+
             {errors.length > 0 && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                 <h2 className="text-sm font-medium text-red-800">Config rejected</h2>
                 <ul className="mt-2 space-y-1">
                   {errors.map((error) => (
-                    <li key={error} className="font-mono text-xs text-red-700">
+                    <li key={error} className="font-mono text-xs break-words text-red-700">
                       {error}
                     </li>
                   ))}
@@ -165,27 +277,36 @@ export default function App() {
             )}
 
             {results && results.length > 0 && (
-              <div className="rounded-lg border border-slate-200 bg-white p-5">
-                <div className="mb-3 flex items-baseline justify-between">
-                  <h2 className="text-sm font-medium text-slate-700">Results</h2>
-                  {elapsed !== null && (
-                    <span className="text-xs text-slate-400">{elapsed.toFixed(2)}s</span>
-                  )}
-                </div>
+              <Panel
+                title="Results"
+                aside={elapsed !== null ? `${elapsed.toFixed(2)}s` : undefined}
+              >
                 <ResultsTable results={results} />
-              </div>
+              </Panel>
             )}
-
-            {!results && errors.length === 0 && (
-              <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center">
-                <p className="text-sm text-slate-500">
-                  Choose a quantizer and press Run.
-                </p>
-              </div>
-            )}
-          </section>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function Panel({
+  title,
+  aside,
+  children,
+}: {
+  title: string;
+  aside?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-5">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-sm font-medium text-slate-700">{title}</h2>
+        {aside && <span className="text-xs text-slate-400">{aside}</span>}
+      </div>
+      {children}
+    </section>
   );
 }

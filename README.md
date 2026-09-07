@@ -6,8 +6,9 @@ pick a quantizer, set its parameters, point it at vectors, and run it client-sid
 All quantization behavior comes from vq-bench itself, compiled to WebAssembly. No
 quantizer or metric logic is reimplemented in JavaScript.
 
-**Status: Phase 1 complete.** vq-bench runs in WASM, its metrics match the native `vqb`
-CLI on identical inputs, and a minimal browser playground drives it.
+**Status: Phase 2 complete.** vq-bench runs in WASM, its metrics match the native `vqb`
+CLI on identical inputs, and the browser playground has a live-validated config editor,
+loads your own `.h5` files, and keeps a local run history.
 
 ## Layout
 
@@ -17,8 +18,8 @@ vendor/vq-bench/           our fork (branch `playground`, `upstream` remote set)
   crates/vqb-wasm/         the WASM wrapper -- the only Rust we maintain
 tools/                     Phase 0 harness: fixture generation, headless runs, parity check
 web/                       the playground UI (Vite + React + Tailwind)
-  src/lib/                 wasm worker, dataset loading, param shapes
-  src/components/          the picker and the results table
+  src/lib/                 wasm worker, dataset + .h5 loading, run history
+  src/components/          pickers, config editor, results table, history
   test/smoke.mjs           drives the real UI in Chromium
 ```
 
@@ -50,7 +51,23 @@ cd web && npm install && npm run dev
 
 Then open the printed URL. Pick a quantizer, adjust its params, press Run. A
 comma-separated numeric param sweeps, so `b` of `2, 4, 6` runs three quantizers and
-returns three rows.
+returns three rows. The JSON editor is dry-run against vq-bench as you type, so an
+invalid param is flagged before you run anything.
+
+Drop in your own `.h5` to run against it. Two layouts are accepted:
+
+| | base vectors | queries | ground truth |
+|---|---|---|---|
+| harness (what `vqb data get` writes) | `base` | `eval` | `eval_candidates` |
+| VIBE (what you download) | `train` | `test` | `neighbors` |
+
+Rows are sampled uniformly at random (seeded, so the same file and settings give the same
+subset) rather than taken from the front, since real datasets are often ordered. When a
+file ships no ground truth -- or when subsampling makes its indices meaningless -- the
+exact top-L is brute-forced by vq-bench through the WASM boundary, never in JS.
+
+Runs are kept in IndexedDB on your device: the config, the scores, and how long it took.
+Never the vectors, and never the file.
 
 To check the UI end to end (needs `npm run dev` in another terminal):
 
@@ -90,6 +107,7 @@ Four exported functions, kept deliberately small so UI work rarely needs a Rust 
 | `list_metrics()` | every metric this build reports (9) |
 | `validate_config(json, dim)` | the dry run: names, params, values -- computes nothing |
 | `run(json, base, eval, dim, candidates, cand_width)` | fit, encode, score, reconstruct |
+| `top_neighbors(base, eval, dim, l, on_progress)` | exact top-L ground truth, with progress |
 
 Config JSON matches the CLI's, minus `datasets` (the browser passes vectors directly).
 An array-valued param sweeps, as upstream: `{"name": "minmax", "b": [2, 4, 6]}` is three runs.
@@ -101,7 +119,10 @@ Kept minimal and additive so rebasing onto upstream stays cheap:
 1. **`src/bin/vqb/bench.rs` → `src/metrics.rs`**, exported as `pub mod metrics`. The metric
    math was trapped inside the CLI binary. It depends only on `std` + `rand`, so it moved
    as-is; the CLI aliases it back as `crate::bench` and every call site is unchanged.
-2. **faer without its `rayon` feature.** That feature pulls `spindle` → `atomic-wait`, which
+2. **`TopL` / `tile_rows` → `src/candidates.rs`**, exported as `pub mod candidates` with a
+   `top_neighbors_with_progress` entry point. Exact top-L search was CLI-only, so a browser
+   had no way to build ground truth for a file that ships none.
+3. **faer without its `rayon` feature.** That feature pulls `spindle` → `atomic-wait`, which
    has no `wasm32-unknown-unknown` backend. All other faer defaults are kept, so native
    builds are unaffected.
 
@@ -130,6 +151,11 @@ are read from the registry rather than hardcoded.
   value is still checked by `validate_config` (which calls the quantizer's own `build`),
   so a wrong hint surfaces as a real error from vq-bench rather than a bad run. An
   unlisted param falls back to a text field and still works.
-- **Datasets are still synthetic.** Real `.h5` loading (h5wasm, hyperslab reads) is Phase 2.
-  The fixture is written to a registry dataset's path so the native CLI can read it; a real
-  `.h5` has not been validated yet.
+- **A `.h5` must fit in the WASM address space.** h5wasm needs the whole file resident
+  before it can read any of it (HDF5 wants random access; the browser's only filesystem is
+  in-memory), and `wasm32` addresses at most 4 GB regardless of how much RAM the machine
+  has. Roughly: ~300 MB is comfortable, ~1 GB is slow, ~3 GB will not work. The UI warns
+  past 500 MB. Lifting this needs a lazy range-request reader, `wasm64`, or the Phase 6
+  Tauri build -- not a Phase 2 change.
+- **h5wasm is ~4.8 MB** against our own 813 KB module, so it is lazy-loaded on first file
+  open and never touches the default page load.

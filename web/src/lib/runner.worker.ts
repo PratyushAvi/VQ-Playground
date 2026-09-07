@@ -7,6 +7,7 @@ import init, {
   list_metrics,
   validate_config,
   run,
+  top_neighbors,
 } from "../wasm/vqb_wasm.js";
 import wasmUrl from "../wasm/vqb_wasm_bg.wasm?url";
 
@@ -29,6 +30,25 @@ const api = {
   async validate(config: string, dim: number): Promise<ValidationResponse> {
     await ready;
     return JSON.parse(validate_config(config, dim));
+  },
+
+  /**
+   * Exact top-`l` neighbors, for a dataset that ships no ground truth. The
+   * progress callback arrives from the UI thread as a Comlink proxy, so it is
+   * invoked rather than called directly.
+   */
+  async topNeighbors(
+    base: Float32Array,
+    evalQueries: Float32Array,
+    dim: number,
+    l: number,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Uint32Array> {
+    await ready;
+    const report = onProgress
+      ? (done: number, total: number) => void onProgress(done, total)
+      : undefined;
+    return top_neighbors(base, evalQueries, dim, l, report);
   },
 
   async run(config: string, data: Dataset): Promise<RunResponse> {
