@@ -1,0 +1,8 @@
+node_modules/
+dist/
+
+# Built by tools/build_wasm.sh from the fork.
+src/wasm/
+
+# Copied from tools/fixtures by hand; regenerate with tools/make_fixture.py.
+public/data/

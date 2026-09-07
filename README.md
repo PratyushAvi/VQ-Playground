@@ -6,8 +6,8 @@ pick a quantizer, set its parameters, point it at vectors, and run it client-sid
 All quantization behavior comes from vq-bench itself, compiled to WebAssembly. No
 quantizer or metric logic is reimplemented in JavaScript.
 
-**Status: Phase 0 complete.** vq-bench runs in WASM and its metrics match the native
-`vqb` CLI on identical inputs. There is no UI yet.
+**Status: Phase 1 complete.** vq-bench runs in WASM, its metrics match the native `vqb`
+CLI on identical inputs, and a minimal browser playground drives it.
 
 ## Layout
 
@@ -16,7 +16,10 @@ vendor/vq-bench/           our fork (branch `playground`, `upstream` remote set)
   src/metrics.rs           metrics, moved out of the CLI so a library user can call them
   crates/vqb-wasm/         the WASM wrapper -- the only Rust we maintain
 tools/                     Phase 0 harness: fixture generation, headless runs, parity check
-web/                       (Phase 1) the playground UI
+web/                       the playground UI (Vite + React + Tailwind)
+  src/lib/                 wasm worker, dataset loading, param shapes
+  src/components/          the picker and the results table
+  test/smoke.mjs           drives the real UI in Chromium
 ```
 
 ## Getting the fork
@@ -37,6 +40,26 @@ have pushed your fork:
 cd vendor/vq-bench && git remote add origin git@github.com:<you>/vq-bench.git && git push -u origin playground
 cd ../.. && git submodule add git@github.com:<you>/vq-bench.git vendor/vq-bench
 ```
+
+## Running the playground
+
+```sh
+./tools/build_wasm.sh          # build the wasm module into web/src/wasm/
+cd web && npm install && npm run dev
+```
+
+Then open the printed URL. Pick a quantizer, adjust its params, press Run. A
+comma-separated numeric param sweeps, so `b` of `2, 4, 6` runs three quantizers and
+returns three rows.
+
+To check the UI end to end (needs `npm run dev` in another terminal):
+
+```sh
+cd web && npm run smoke
+```
+
+It drives Chromium and asserts, among other things, that the browser's recall matches
+the values Phase 0 pinned against the native CLI.
 
 ## Verifying Phase 0
 
@@ -102,6 +125,11 @@ are read from the registry rather than hardcoded.
   seed-to-seed spread — on native, ITQ moves 0.250/0.274/0.254 across seeds 1/2/3 while
   MinMax stays flat at 0.694. `tools/compare_parity.mjs` encodes this as a wider tolerance
   for those two families and holds every other method to near-exact agreement.
+- **The UI's param table is a rendering hint, not a rule.** `web/src/lib/params.ts` maps
+  param names to input types, because the registry reports names but not types. Every
+  value is still checked by `validate_config` (which calls the quantizer's own `build`),
+  so a wrong hint surfaces as a real error from vq-bench rather than a bad run. An
+  unlisted param falls back to a text field and still works.
 - **Datasets are still synthetic.** Real `.h5` loading (h5wasm, hyperslab reads) is Phase 2.
   The fixture is written to a registry dataset's path so the native CLI can read it; a real
   `.h5` has not been validated yet.
