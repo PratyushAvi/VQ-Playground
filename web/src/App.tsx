@@ -9,6 +9,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as Comlink from "comlink";
 
 import { ConfigEditor } from "./components/ConfigEditor";
+import { Landing } from "./components/Landing";
+import { NavBar } from "./components/NavBar";
+import { SotaOverlay } from "./components/SotaOverlay";
 import { DatasetPicker } from "./components/DatasetPicker";
 import { MethodPicker } from "./components/MethodPicker";
 import { PipelineBuilder } from "./components/PipelineBuilder";
@@ -28,7 +31,38 @@ const SEED = 1;
 /** Small by default: a phone could be the runtime, and a big base is slow. */
 const DEFAULT_LOAD: LoadOptions = { nBase: 10000, nEval: 100, candWidth: 100, seed: SEED };
 
+type View = "landing" | "playground";
+
+function viewFromHash(): View {
+  return window.location.hash === "#playground" ? "playground" : "landing";
+}
+
 export default function App() {
+  const [view, setView] = useState<View>(viewFromHash);
+
+  useEffect(() => {
+    const sync = () => setView(viewFromHash());
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const navigate = useCallback((next: View) => {
+    window.location.hash = next === "playground" ? "#playground" : "";
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <NavBar view={view} onNavigate={navigate} />
+      {view === "landing" ? (
+        <Landing onOpenPlayground={() => navigate("playground")} />
+      ) : (
+        <Playground />
+      )}
+    </div>
+  );
+}
+
+function Playground() {
   const [quantizers, setQuantizers] = useState<Quantizer[]>([]);
   const [primitives, setPrimitives] = useState<PrimitiveSpec[]>([]);
   const [mode, setMode] = useState<"family" | "custom">("family");
@@ -217,16 +251,8 @@ export default function App() {
   const ready = quantizers.length > 0 && dataset !== null;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <header className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">VQ-bench Playground</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Vector quantizers running locally in your browser, via WebAssembly.
-          </p>
-        </header>
-
-        <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
           <div className="space-y-6">
             <Panel title="Quantizer">
               <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-0.5">
@@ -330,14 +356,19 @@ export default function App() {
             )}
 
             {results && results.length > 0 && (
-              <Panel
-                title="Results"
-                aside={elapsed !== null ? `${elapsed.toFixed(2)}s` : undefined}
-              >
-                <ResultsTable results={results} />
-              </Panel>
+              <>
+                <Panel
+                  title="Results"
+                  aside={elapsed !== null ? `${elapsed.toFixed(2)}s` : undefined}
+                >
+                  <ResultsTable results={results} />
+                </Panel>
+
+                <Panel title="Against the benchmark">
+                  <SotaOverlay results={results} k={DEFAULT_KS[DEFAULT_KS.length - 1]} />
+                </Panel>
+              </>
             )}
-          </div>
         </div>
       </div>
     </div>

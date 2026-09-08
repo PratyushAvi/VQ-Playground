@@ -42,7 +42,21 @@ page.on("console", (m) => {
 });
 
 await page.goto(URL, { waitUntil: "networkidle" });
+
+// --- Landing page ---
+await page.waitForSelector("svg[role=img]", { timeout: 30000 });
+const landingSeries = await page.locator("figure ul li").allInnerTexts();
+check("landing plots the published results", landingSeries.length === 5, landingSeries.join(", "));
+check(
+  "nav links out to the project",
+  (await page.locator('a[href="https://www.vq-bench.com"]').count()) > 0 &&
+    (await page.locator('a[href="https://github.com/pinecone-io/vq-bench"]').count()) > 0,
+  "missing external links",
+);
+
+await page.getByRole("button", { name: "Open the playground" }).click();
 await page.waitForSelector("select", { timeout: 30000 });
+check("the playground opens", (await page.evaluate(() => location.hash)) === "#playground", "wrong hash");
 
 const families = await page.locator("select").first().locator("option").count();
 check("registry populates the dropdown", families === 15, `${families} families`);
@@ -168,6 +182,30 @@ check(
   /stage 1/.test(stageError) && /b must be in 1\.\.=8/.test(stageError),
   stageError,
 );
+
+// --- The benchmark overlay ---
+await page.locator("text=/back to the sample dataset/").click().catch(() => {});
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: "Built-in" }).click();
+await page.selectOption("select", "minmax");
+await page.waitForTimeout(200);
+await page.locator('input[inputmode="numeric"]').first().fill("2, 4, 6");
+await page.getByRole("button", { name: /^run$/i }).click();
+await page.waitForFunction(() => document.querySelectorAll("tbody tr").length === 3, null, { timeout: 120000 });
+await page.waitForSelector("text=/Against the benchmark/", { timeout: 20000 });
+
+const overlay = await page.locator("figure ul li").allInnerTexts();
+check(
+  "the overlay plots your run against the published curves",
+  overlay.length === 6 && overlay.some((t) => /your run/.test(t)),
+  overlay.join(", "),
+);
+
+// The overlay must be optional: unchecking leaves only the reader's own curve.
+await page.locator('input[type="checkbox"]').first().uncheck();
+await page.waitForTimeout(200);
+const alone = await page.locator("figure ul li").allInnerTexts();
+check("the overlay can be turned off", alone.length === 1, alone.join(", "));
 
 check("no console or page errors", problems.length === 0, problems.join("; "));
 

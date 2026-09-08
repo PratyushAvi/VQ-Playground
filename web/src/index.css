@@ -1,1 +1,45 @@
 @import "tailwindcss";
+
+/* Chart palette.
+ *
+ * Categorical slots in fixed order, so a quantizer family keeps its colour as
+ * the series list changes. Both modes are selected, not flipped: the dark
+ * column is the same hues re-stepped for the dark surface. Validated for
+ * lightness, chroma, CVD separation and contrast in both modes.
+ *
+ * `--series-mine` is reserved for the reader's own result, never used for a
+ * reference curve. */
+.viz-root {
+  --surface-1: #fcfcfb;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #4a3aa7;
+  --series-mine: #0b0b0b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    --surface-1: #1a1a19;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #9085e9;
+    --series-mine: #ffffff;
+  }
+}
+
+:root[data-theme="dark"] .viz-root {
+  --surface-1: #1a1a19;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #9085e9;
+  --series-mine: #ffffff;
+}

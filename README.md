@@ -6,7 +6,7 @@ pick a quantizer, set its parameters, point it at vectors, and run it client-sid
 All quantization behavior comes from vq-bench itself, compiled to WebAssembly. No
 quantizer or metric logic is reimplemented in JavaScript.
 
-**Status: Phase 2 complete, plus custom pipelines.** vq-bench runs in WASM, its metrics
+**Status: Phase 2 complete, plus custom pipelines and a landing page.** vq-bench runs in WASM, its metrics
 match the native `vqb` CLI on identical inputs, and the browser playground has a
 live-validated config editor, loads your own `.h5` files, keeps a local run history, and
 lets you compose your own quantizer from vq-bench's primitives.
@@ -17,10 +17,10 @@ lets you compose your own quantizer from vq-bench's primitives.
 vendor/vq-bench/           our fork (branch `playground`, `upstream` remote set)
   src/metrics.rs           metrics, moved out of the CLI so a library user can call them
   crates/vqb-wasm/         the WASM wrapper -- the only Rust we maintain
-tools/                     Phase 0 harness: fixture generation, headless runs, parity check
+tools/                     Phase 0 harness, wasm build, published-results extraction
 web/                       the playground UI (Vite + React + Tailwind)
   src/lib/                 wasm worker, dataset + .h5 loading, run history
-  src/components/          pickers, config editor, results table, history
+  src/components/          nav, landing, pickers, editor, charts, results, history
   test/smoke.mjs           drives the real UI in Chromium
 ```
 
@@ -69,6 +69,20 @@ exact top-L is brute-forced by vq-bench through the WASM boundary, never in JS.
 
 Runs are kept in IndexedDB on your device: the config, the scores, and how long it took.
 Never the vectors, and never the file.
+
+### Comparing against the benchmark
+
+The landing page plots the five strongest quantizer families from the published vq-bench
+results, and the playground overlays your own run on the same axes — recall@10 against
+bits per dimension, where up and to the left is better.
+
+Those curves come from `tools/extract_sota.py`, which distills the fork's own
+`docs/results/aug-2026.json` (the file behind the table on vq-bench.com) down to ~30 KB.
+It is bundled as a static asset, so the comparison works offline like everything else.
+Re-run it after syncing the fork to pick up a newer benchmark run.
+
+The overlay compares *your* vectors against results measured on someone else's, so it is
+labelled as shape-against-shape rather than a like-for-like score.
 
 ### Composing your own quantizer
 
