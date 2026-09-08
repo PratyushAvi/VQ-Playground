@@ -5,7 +5,7 @@
 // rewrites the JSON; editing the JSON leaves the form alone, since arbitrary
 // JSON has no faithful form representation.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Comlink from "comlink";
 
 import { ConfigEditor } from "./components/ConfigEditor";
@@ -39,6 +39,7 @@ import {
 } from "./lib/history";
 import { defaultValue, toConfigValue } from "./lib/params";
 import { runner } from "./lib/runner";
+import { withLoader } from "./lib/loader-pool";
 import type { MethodResult, PrimitiveSpec, Quantizer, Stage } from "./lib/types";
 
 const DEFAULT_METRICS = ["recall", "mse_score", "mse_recon"];
@@ -99,6 +100,10 @@ function Playground() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<string[]>(["sample"]);
   const [progress, setProgress] = useState<Record<string, Progress>>({});
+  // Rows with an import in flight. The ref is what guards against a double
+  // start: two clicks in the same tick would both see the same stale array.
+  const [importing, setImporting] = useState<string[]>([]);
+  const importingRef = useRef<Set<string>>(new Set());
   const [baseUrl, setBaseUrl] = useState("");
   const [loadOptions, setLoadOptions] = useState<LoadOptions>(DEFAULT_LOAD);
 
@@ -270,11 +275,15 @@ function Playground() {
           ? ({ kind: "file", file: entry.source.file } as const)
           : ({ kind: "url", url: datasetUrl(baseUrl, (entry.source as { remote: { name: string } }).remote.name) } as const);
 
-      const loaded = (await runner().loadDataset(
-        source,
-        loadOptions,
-        Comlink.proxy((stage: string, done: number, total: number) =>
-          report(entry.id, stage, done, total),
+      // On a loader worker of its own, so several imports overlap instead of
+      // queueing behind one blocked event loop.
+      const loaded = (await withLoader((api) =>
+        api.loadDataset(
+          source,
+          loadOptions,
+          Comlink.proxy((stage: string, done: number, total: number) =>
+            report(entry.id, stage, done, total),
+          ),
         ),
       )) as LoadedFile;
 
@@ -298,15 +307,28 @@ function Playground() {
     async (id: string) => {
       const entry = entries.find((e) => e.id === id);
       if (!entry || entry.dataset) return;
-      setErrors([]);
+      // Guard the row rather than the panel: another import may well be in
+      // flight, and that is no reason to refuse this one.
+      if (importingRef.current.has(id)) return;
+      importingRef.current.add(id);
+      setImporting((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      // A failed import leaves its own message; clear only that row's.
+      setErrors((prev) => prev.filter((e) => !e.startsWith(`${entry.title}: `)));
+      // Queued behind the pool's limit, the row would otherwise show nothing
+      // at all between the click and the first byte.
+      report(id, "waiting for a slot", 0, 0);
       try {
         await ensureLoaded(entry);
         // Ticking it is the obvious next step, so do it for them.
         setSelected((prev) => (prev.includes(id) ? prev : [...prev, id]));
       } catch (err: unknown) {
-        setErrors([`${entry.title}: ${(err as Error).message ?? String(err)}`]);
-        // Clear the bar so the row offers `import` again rather than sticking
-        // on "importing…".
+        setErrors((prev) => [...prev, `${entry.title}: ${(err as Error).message ?? String(err)}`]);
+      } finally {
+        importingRef.current.delete(id);
+        setImporting((prev) => prev.filter((x) => x !== id));
+        // Drop the bar either way: on success the row is ticked and the
+        // summary says what landed, and on failure it must offer `import`
+        // again rather than sticking on "importing…".
         setProgress((prev) => {
           const next = { ...prev };
           delete next[id];
@@ -314,7 +336,7 @@ function Playground() {
         });
       }
     },
-    [ensureLoaded, entries],
+    [ensureLoaded, entries, report],
   );
 
   /** Keep the composed chain under a name, so it can be run again later. */
@@ -570,6 +592,7 @@ function Playground() {
               selected={selected}
               progress={progress}
               disabled={busy}
+              importing={importing}
               onToggle={(id) =>
                 setSelected((prev) =>
                   prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],

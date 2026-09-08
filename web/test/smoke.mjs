@@ -196,6 +196,51 @@ const badBox = page.locator("li").filter({ hasText: "wrong.h5" }).first()
   .getByRole("checkbox");
 check("a dataset that failed to import stays unselectable", await badBox.isDisabled(), "it was tickable");
 
+// Imports run on workers of their own. A download used to block the single run
+// worker inside synchronous XHR, so every other import button did nothing --
+// the click could not even be dequeued until the first finished.
+{
+  const importable = page.getByRole("button", { name: "import", exact: true });
+  if ((await importable.count()) >= 2) {
+    // Earlier rows leave their own finished bars behind, so name the two rows
+    // this check starts and look only at those.
+    const rowTitle = (button) =>
+      button.evaluate((el) => el.closest("li")?.querySelector("p")?.textContent ?? "");
+    const first = await rowTitle(importable.nth(0));
+    await importable.nth(0).click();
+    const second = await rowTitle(importable.nth(0));
+    await importable.nth(0).click();
+
+    // Sample while both should still be in flight: waiting for a condition
+    // would also be satisfied by a serial pool, since the first import simply
+    // finishes and the second then starts.
+    await page.waitForTimeout(1200);
+    const active = await page.evaluate(
+      (titles) =>
+        [...document.querySelectorAll('[role="progressbar"]')]
+          .map((el) => el.getAttribute("aria-label") ?? "")
+          .filter(
+            (label) =>
+              titles.some((t) => t && label.startsWith(`${t}: `)) &&
+              !/waiting for a slot/.test(label),
+          ),
+      [first, second],
+    );
+    check(
+      "two datasets import at once",
+      active.length >= 2,
+      `only ${active.length} of [${first}, ${second}] downloading: ${active.join(" | ")}`,
+    );
+
+    const others = page.getByRole("button", { name: "import", exact: true });
+    check(
+      "an import in flight leaves the other import buttons live",
+      (await others.count()) === 0 || (await others.first().isEnabled()),
+      "they were disabled",
+    );
+  }
+}
+
 // --- Custom pipelines ---
 // The sample dataset only, so the composed chain is compared against the
 // built-in on identical vectors.

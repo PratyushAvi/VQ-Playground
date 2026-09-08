@@ -18,7 +18,10 @@ type Props = {
   entries: Entry[];
   selected: string[];
   progress: Record<string, Progress>;
+  /** A run is in flight: the selection is fixed for its duration. */
   disabled: boolean;
+  /** Rows with an import in flight, which may be several at once. */
+  importing: string[];
   onToggle: (id: string) => void;
   onImport: (id: string) => void;
   onAddFile: (file: File) => void;
@@ -29,6 +32,7 @@ export function DatasetList({
   selected,
   progress,
   disabled,
+  importing,
   onToggle,
   onImport,
   onAddFile,
@@ -60,7 +64,7 @@ export function DatasetList({
           // Only an imported dataset can be ticked: until its vectors are read
           // there is nothing to run against, and a tick would promise otherwise.
           const imported = entry.dataset !== undefined;
-          const importing = bar !== undefined && !imported;
+          const inFlight = importing.includes(entry.id);
           return (
             <li key={entry.id} className="py-2">
               <div className="flex items-start gap-2">
@@ -86,12 +90,15 @@ export function DatasetList({
                 {!imported && (
                   <button
                     onClick={() => onImport(entry.id)}
-                    disabled={disabled || importing}
+                    // Only this row's own import disables it. Another dataset
+                    // downloading is no reason to refuse this one -- imports
+                    // run on workers of their own.
+                    disabled={inFlight}
                     className="shrink-0 rounded border border-slate-300 px-2 py-1 text-xs
                                text-slate-600 hover:border-slate-500 hover:text-slate-900
                                disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {importing ? "importing…" : "import"}
+                    {inFlight ? "importing…" : "import"}
                   </button>
                 )}
               </div>

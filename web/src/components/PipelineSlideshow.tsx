@@ -55,11 +55,15 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
       onMouseLeave={() => setPaused(false)}
       className="rounded-lg border border-slate-200 bg-white p-6"
     >
-      <div className="mb-1 flex items-baseline justify-between gap-3">
+      {/* <div className="mb-1 flex items-baseline justify-between gap-3">
         <h2 className="text-base text-slate-900">{current.family}</h2>
         <span className="text-xs text-slate-400">
           every method is a pipeline of primitives
         </span>
+      </div> */}
+
+      <div className="mb-1 text-center">
+        <h2 className="text-[1.5rem]">{current.family}</h2>
       </div>
 
       {/* Fixed height, sized for the longest pipeline, with the chain centred:
@@ -80,7 +84,7 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
                 color: KIND_COLOR[stage.kind],
                 // A tint of the same hue, so the fill reads as the border's
                 // family rather than as a second colour.
-                backgroundColor: `color-mix(in oklab, ${KIND_COLOR[stage.kind]} 8%, white)`,
+                backgroundColor: `color-mix(in oklab, ${KIND_COLOR[stage.kind]} 0%, white)`,
               }}
             >
               {stage.label}

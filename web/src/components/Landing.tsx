@@ -174,19 +174,16 @@ export function Landing({ onOpenPlayground }: Props) {
 
     <section className="mx-auto max-w-6xl px-6 pb-4">
       <div className="grid gap-8 border-t border-slate-200 pt-8 md:grid-cols-3">
-        <Point title="It is really vq-bench">
-          The Rust crate is compiled to WebAssembly and called directly. Every score comes
-          from the same code the CLI runs — verified to match it exactly on identical
-          inputs. Nothing is reimplemented in JavaScript.
+        <Point title="Test Quantizers in your Browser">
+          The Rust crate for VQ-Bench is compiled to WebAssembly and called directly. Every score comes
+          from the same code the CLI runs.
         </Point>
-        <Point title="Compose your own quantizer">
-          Chain vq-bench's primitives into a pipeline of your own —{" "}
-          <span className="font-mono text-xs">center → normalize → rotate → cast_angular</span>{" "}
-          is E-RaBitQ, and composing it by hand reproduces it exactly. No recompile.
+        <Point title="Compose your own Quantizer">
+          Chain VQ-Bench primitives into a vector quantizer of your own.
         </Point>
-        <Point title="Bring your own vectors">
-          Drop in an <span className="font-mono text-xs">.h5</span> file and it is read in
-          the browser. Your data never leaves the device; there is no backend to send it to.
+        <Point title="Run on Custom Datasets">
+          Drop in an <span className="font-mono text-black">.h5</span> file and run the quantizers directly
+          the browser.
         </Point>
       </div>
     </section>
