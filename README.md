@@ -46,11 +46,26 @@ cd ../.. && git submodule add git@github.com:<you>/vq-bench.git vendor/vq-bench
 ## Running the playground
 
 ```sh
-./tools/build_wasm.sh          # wasm module + sample dataset into web/
 cd web && npm install && npm run dev
 ```
 
-Then open the printed URL. Pick a quantizer, adjust its params, press Run. A
+`web/src/wasm/` and `web/public/data/` are **committed**, so a fresh clone runs and
+builds with only Node — no Rust toolchain, no fork. That is what lets a static host
+build the site from this repo alone.
+
+The cost is that the binary can drift from the crate it was built from: after any
+change to `vendor/vq-bench`, re-run
+
+```sh
+./tools/build_wasm.sh          # wasm module + sample dataset into web/
+```
+
+and commit the result, or the app keeps running the previous build. Making the fork
+a submodule and building in CI is the better long-term answer.
+
+### Using it
+
+Open the URL `npm run dev` prints. Pick a quantizer, adjust its params, press Run. A
 comma-separated numeric param sweeps, so `b` of `2, 4, 6` runs three quantizers and
 returns three rows. The JSON editor is dry-run against vq-bench as you type, so an
 invalid param is flagged before you run anything.
