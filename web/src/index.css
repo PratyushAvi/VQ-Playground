@@ -6,18 +6,18 @@
  * rules are linked from index.html, not imported here -- the bundler strips an
  * @import that follows Tailwind's, and does it silently.
  *
- * Gambarino ships a single 400 cut, so headings are distinguished by size and
- * letterspacing rather than weight -- asking for 600 would get a synthesised
- * bold, which smears the face's contrast. Boska is loaded as its variable cut,
- * covering 200-900 plus italics, and is the alternate display face: point
- * `--font-heading` at `--font-display-alt` to switch, and heading weights
- * become available. */
+ * Weights are listed explicitly in the Fontshare URL. The API silently drops
+ * one family when a variable spec (`@1,2`) is combined with a static one, and
+ * the dropped face then falls back to a system serif with no error -- so ask
+ * for the weights you want by number.
+ *
+ * Gambetta ships 300-700; Gambarino a single 400 cut and no bold. */
 @theme {
   /* The two roles the UI styles against. Change these, not the call sites. */
-  --font-body: "Open Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: "Gambarino", Georgia, "Times New Roman", serif;
+  --font-body: "Gambetta", Georgia, "Times New Roman", serif;
+  --font-heading: "Open Sans", ui-sans-serif, system-ui, sans-serif;
   /* The other imported face, unused by default but ready to swap in. */
-  --font-display-alt: "Boska", Georgia, serif;
+  --font-display-alt: "Gambarino", Georgia, serif;
 
   /* Tailwind's own `font-sans` / `font-serif`, so utility classes and the
      variables cannot drift apart. */
@@ -33,16 +33,32 @@ h1,
 h2,
 h3 {
   font-family: var(--font-heading);
-  /* Gambarino has no bold cut; size and tracking carry the hierarchy instead,
-     and asking for a heavier weight would only get a synthesised one. */
-  font-weight: 400;
+  font-weight: 600;
 }
 
-/* A subhead sits at body size, so without weight to separate it the face alone
-   has to do the work. Slight positive tracking and a darker ink give it the
-   lift `font-medium` used to. */
-h3 {
-  letter-spacing: 0.01em;
+h1 {
+  font-weight: 700;
+}
+
+/* Boska is a display serif doing body duty, so it needs more line height than
+   a sans would at the same size to stay readable in a paragraph. */
+body {
+  line-height: 1.6;
+  /* Lining, tabular figures: Boska defaults to old-style numerals, which drop
+     4/6/9 below the baseline. Fine in prose, but a column of them will not
+     align, and a results table is read by scanning down that column. */
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* Dense numeric UI -- tables, axis ticks, the legend -- is where a display
+   serif thins out at 12px. Those parts take the sans instead; the prose keeps
+   Boska. */
+table,
+.viz-root,
+code,
+kbd,
+pre {
+  font-family: var(--font-heading);
 }
 
 /* Chart palette.
