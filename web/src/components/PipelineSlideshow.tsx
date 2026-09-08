@@ -73,7 +73,7 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
         {current.stages.map((stage, i) => (
           <li key={`${current.key}-${i}`} className="flex flex-col items-center">
             <span
-              className="rounded-md border-2 px-4 py-2 text-center text-sm whitespace-nowrap"
+              className="rounded-md border-2 px-4 py-2 text-center text-base whitespace-nowrap"
               style={{
                 fontFamily: "var(--font-diagram)",
                 borderColor: KIND_COLOR[stage.kind],

@@ -20,7 +20,7 @@
   --font-display-alt: "Gambarino", Georgia, serif;
   /* The pipeline diagram's boxes -- its own role, so the diagram can be
      restyled without touching body or heading text. */
-  --font-diagram: "Kalam", ui-monospace, SFMono-Regular, monospace;
+  --font-diagram: "Indie Flower", ui-monospace, SFMono-Regular, monospace;
 
   /* Primitive groups, coloured as vq-bench groups them: conditioners reshape
      the vectors, rounders are what actually quantize, splitters fan out. */
