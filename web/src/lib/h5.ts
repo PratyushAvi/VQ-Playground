@@ -108,31 +108,88 @@ export type LoadedFile = {
  * `bruteForce` computes exact top-L when the file ships no neighbors; it is
  * passed in rather than imported so this module stays free of the wasm runner.
  */
+export type BruteForce = (
+  base: Float32Array,
+  evalQueries: Float32Array,
+  dim: number,
+  l: number,
+) => Promise<Uint32Array>;
+
+/** Read a file the user picked. The bytes must all be resident -- see below. */
 export async function loadH5(
   file: File,
   options: LoadOptions,
-  bruteForce: (
-    base: Float32Array,
-    evalQueries: Float32Array,
-    dim: number,
-    l: number,
-  ) => Promise<Uint32Array>,
+  bruteForce: BruteForce,
 ): Promise<LoadedFile> {
   const mod = await h5wasm();
   // h5wasm types FS as nullable because it is only populated once `ready`
   // resolves, which it has by the time h5wasm() returns.
   const FS = mod.FS!;
-  const H5File = mod.File;
   options.onProgress?.("reading file", 0, 1);
 
-  // HDF5 needs random access, so the bytes must be resident before any read.
-  // That, not the machine's RAM, is what caps the file size we can accept.
+  // A local File has no byte-range endpoint, so HDF5's random access means the
+  // whole thing must be in memory. wasm32 addresses at most 4 GB, so this is
+  // where the size ceiling on uploads comes from -- remote imports below avoid
+  // it entirely by fetching only the ranges HDF5 asks for.
   const bytes = new Uint8Array(await file.arrayBuffer());
   const scratch = `upload-${Date.now()}.h5`;
   FS.writeFile(scratch, bytes);
   options.onProgress?.("reading file", 1, 1);
 
-  const handle = new H5File(scratch, "r");
+  return readMounted(scratch, options, bruteForce, () => {
+    try {
+      FS.unlink(scratch);
+    } catch {
+      // Best effort: the in-memory file goes away with the page anyway.
+    }
+  });
+}
+
+/**
+ * Import a dataset straight from its URL, without downloading it whole.
+ *
+ * `createLazyFile` backs the file with byte-range requests, so HDF5 pulls only
+ * the chunks it actually reads. Sampling a few thousand rows out of a multi-GB
+ * dataset therefore transfers megabytes, not gigabytes -- which is what makes
+ * the larger VIBE datasets usable in a browser at all.
+ *
+ * The reads are synchronous XHR under the hood: fine in a worker, blocked on
+ * the main thread, so this must not be called from the UI thread.
+ */
+export async function loadRemoteH5(
+  url: string,
+  options: LoadOptions,
+  bruteForce: BruteForce,
+): Promise<LoadedFile> {
+  const mod = await h5wasm();
+  const FS = mod.FS!;
+  options.onProgress?.("opening remote file", 0, 1);
+
+  const name = `remote-${Date.now()}.h5`;
+  // (parent, name, url, canRead, canWrite) -- the file is read-only and its
+  // contents are never held in full.
+  FS.createLazyFile("/", name, url, true, false);
+  options.onProgress?.("opening remote file", 1, 1);
+
+  return readMounted(name, options, bruteForce, () => {
+    try {
+      FS.unlink(name);
+    } catch {
+      // Best effort.
+    }
+  });
+}
+
+/** Everything after the bytes are reachable, shared by both sources. */
+async function readMounted(
+  path: string,
+  options: LoadOptions,
+  bruteForce: BruteForce,
+  cleanup: () => void,
+): Promise<LoadedFile> {
+  const mod = await h5wasm();
+  const H5File = mod.File;
+  const handle = new H5File(path, "r");
   try {
     const keys = handle.keys();
     const schema = SCHEMAS.find((s) => keys.includes(s.base) && keys.includes(s.eval));
@@ -210,10 +267,6 @@ export async function loadH5(
     };
   } finally {
     handle.close();
-    try {
-      FS.unlink(scratch);
-    } catch {
-      // Best effort: the in-memory file goes away with the page anyway.
-    }
+    cleanup();
   }
 }

@@ -12,6 +12,7 @@ import init, {
 } from "../wasm/vqb_wasm.js";
 import wasmUrl from "../wasm/vqb_wasm_bg.wasm?url";
 
+import { loadH5, loadRemoteH5, type LoadOptions, type LoadedFile } from "./h5";
 import type { Dataset, RunResponse, ValidationResponse } from "./types";
 
 /** Instantiate once; every later call reuses the same module. */
@@ -55,6 +56,38 @@ const api = {
       ? (done: number, total: number) => void onProgress(done, total)
       : undefined;
     return top_neighbors(base, evalQueries, dim, l, report);
+  },
+
+  /**
+   * Read a dataset -- a file the user picked, or a URL fetched by byte range.
+   *
+   * This runs in the worker for two reasons: a big parse would otherwise freeze
+   * the page, and `createLazyFile` uses synchronous XHR, which browsers forbid
+   * on the main thread. Ground truth, when the file ships none, is computed
+   * here too rather than round-tripping the vectors back to the UI thread.
+   */
+  async loadDataset(
+    source: { kind: "file"; file: File } | { kind: "url"; url: string },
+    options: Omit<LoadOptions, "onProgress">,
+    onProgress?: (stage: string, done: number, total: number) => void,
+  ): Promise<LoadedFile> {
+    await ready;
+    const report = onProgress
+      ? (stage: string, done: number, total: number) => void onProgress(stage, done, total)
+      : undefined;
+    const opts: LoadOptions = { ...options, onProgress: report };
+    const bruteForce = async (
+      base: Float32Array,
+      evalQueries: Float32Array,
+      dim: number,
+      l: number,
+    ) => top_neighbors(base, evalQueries, dim, l, (done: number, total: number) =>
+      report?.("computing ground truth", done, total),
+    );
+
+    return source.kind === "file"
+      ? loadH5(source.file, opts, bruteForce)
+      : loadRemoteH5(source.url, opts, bruteForce);
   },
 
   async run(config: string, data: Dataset): Promise<RunResponse> {

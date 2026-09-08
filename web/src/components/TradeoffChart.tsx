@@ -13,6 +13,8 @@ export type Series = {
   points: { bits: number; recall: number; label?: string }[];
   /** Drawn heavier, above the rest -- the reader's own result. */
   emphasis?: boolean;
+  /** Context rather than a subject: one quiet grey, thin, no legend colour. */
+  muted?: boolean;
 };
 
 type Props = {
@@ -164,8 +166,12 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
 
           <g clipPath={`url(#${clipId})`}>
             {series.map((s, i) => {
-              const color = s.emphasis ? "var(--series-mine)" : `var(--series-${(i % SLOTS) + 1})`;
-              const shape = s.emphasis ? "circle" : SHAPES[i % SHAPES.length];
+              const color = s.emphasis
+                ? "var(--series-mine)"
+                : s.muted
+                  ? "var(--series-muted)"
+                  : `var(--series-${(i % SLOTS) + 1})`;
+              const shape = s.emphasis || s.muted ? "circle" : SHAPES[i % SHAPES.length];
               // Dim the rest while one series is focused; several families sit
               // within 0.02 recall of each other, so this is often the only way
               // to follow a single line.
@@ -179,7 +185,8 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
                     d={path}
                     fill="none"
                     stroke={color}
-                    strokeWidth={s.emphasis ? 3 : 2}
+                    strokeWidth={s.emphasis ? 3 : s.muted ? 1.25 : 2}
+                    strokeDasharray={s.muted ? "4 3" : undefined}
                     strokeLinejoin="round"
                     strokeLinecap="round"
                   />
@@ -202,7 +209,7 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
                         shape={shape}
                         cx={x(p.bits)}
                         cy={y(p.recall)}
-                        r={s.emphasis ? 5.5 : 4}
+                        r={s.emphasis ? 5.5 : s.muted ? 2.5 : 4}
                         fill={color}
                       />
                     </g>
@@ -249,14 +256,26 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
           >
             <svg width={13} height={13} aria-hidden className="shrink-0 overflow-visible">
               <Marker
-                shape={s.emphasis ? "circle" : SHAPES[i % SHAPES.length]}
+                shape={s.emphasis || s.muted ? "circle" : SHAPES[i % SHAPES.length]}
                 cx={6.5}
                 cy={6.5}
-                r={s.emphasis ? 5 : 4.5}
-                fill={s.emphasis ? "var(--series-mine)" : `var(--series-${(i % SLOTS) + 1})`}
+                r={s.emphasis ? 5 : s.muted ? 3 : 4.5}
+                fill={
+                  s.emphasis
+                    ? "var(--series-mine)"
+                    : s.muted
+                      ? "var(--series-muted)"
+                      : `var(--series-${(i % SLOTS) + 1})`
+                }
               />
             </svg>
-            <span className={s.emphasis ? "font-medium text-slate-900" : undefined}>{s.name}</span>
+            <span
+              className={
+                s.emphasis ? "font-medium text-slate-900" : s.muted ? "text-slate-400" : undefined
+              }
+            >
+              {s.name}
+            </span>
           </li>
         ))}
       </ul>

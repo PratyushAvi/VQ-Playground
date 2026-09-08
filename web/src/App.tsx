@@ -12,17 +12,24 @@ import { ConfigEditor } from "./components/ConfigEditor";
 import { Landing } from "./components/Landing";
 import { NavBar } from "./components/NavBar";
 import { SotaOverlay } from "./components/SotaOverlay";
-import { DatasetPicker } from "./components/DatasetPicker";
+import { DatasetList } from "./components/DatasetList";
 import { MethodPicker } from "./components/MethodPicker";
 import { PipelineBuilder } from "./components/PipelineBuilder";
 import { ResultsTable } from "./components/ResultsTable";
 import { RunHistory } from "./components/RunHistory";
-import { SAMPLE_DATASET, loadSampleDataset } from "./lib/dataset";
-import { loadH5, type LoadOptions, type LoadedFile } from "./lib/h5";
+import { datasetUrl, loadRegistry, loadSampleDataset } from "./lib/dataset";
+import {
+  benchmarkEntry,
+  customEntry,
+  sampleEntry,
+  type Entry,
+  type Progress,
+} from "./lib/datasets-panel";
+import type { LoadOptions, LoadedFile } from "./lib/h5";
 import { clearRuns, deleteRun, listRuns, saveRun, type RunRecord } from "./lib/history";
 import { defaultValue, toConfigValue } from "./lib/params";
 import { runner } from "./lib/runner";
-import type { Dataset, MethodResult, PrimitiveSpec, Quantizer, Stage } from "./lib/types";
+import type { MethodResult, PrimitiveSpec, Quantizer, Stage } from "./lib/types";
 
 const DEFAULT_METRICS = ["recall", "mse_score", "mse_recon"];
 const DEFAULT_KS = [1, 10];
@@ -67,23 +74,29 @@ function Playground() {
   const [primitives, setPrimitives] = useState<PrimitiveSpec[]>([]);
   const [mode, setMode] = useState<"family" | "custom">("family");
   const [stages, setStages] = useState<Stage[]>([]);
-  const [sample, setSample] = useState<Dataset | null>(null);
-  const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
-  const [loadOptions, setLoadOptions] = useState<LoadOptions>(DEFAULT_LOAD);
-  const [loadingStage, setLoadingStage] = useState<string | null>(null);
-
-  const [selected, setSelected] = useState("minmax");
+  const [selectedFamily, setSelectedFamily] = useState("minmax");
   const [params, setParams] = useState<Record<string, string>>({});
   const [configText, setConfigText] = useState("");
+  // Collapsed by default: the plot is the point, and the JSON is a detail most
+  // sessions never need to open.
+  const [configOpen, setConfigOpen] = useState(false);
 
-  const [results, setResults] = useState<MethodResult[] | null>(null);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [selected, setSelected] = useState<string[]>(["sample"]);
+  const [progress, setProgress] = useState<Record<string, Progress>>({});
+  const [baseUrl, setBaseUrl] = useState("");
+  const [loadOptions, setLoadOptions] = useState<LoadOptions>(DEFAULT_LOAD);
+
+  // One result set per dataset the run covered, keyed by entry id.
+  const [results, setResults] = useState<Record<string, MethodResult[]>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [runs, setRuns] = useState<RunRecord[]>([]);
-
-  const dataset = loadedFile?.dataset ?? sample;
-  const datasetName = loadedFile ? "local file" : SAMPLE_DATASET.name;
+  // The ids this run wrote, so the plot can tell earlier runs from the one it
+  // is drawing as the subject. Ids carry a random offset to stay unique across
+  // a multi-dataset run, so they do not compare reliably against a timestamp.
+  const [currentRunIds, setCurrentRunIds] = useState<number[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,30 +110,43 @@ function Playground() {
         if (cancelled) return;
         setQuantizers(families);
         setPrimitives(stageKinds);
-        setSample(data);
         setRuns(saved);
+        // The sample is bundled, so it is ready the moment the page is. The
+        // registry loads separately and may land first, so merge rather than
+        // replace -- whichever arrives second must not drop the other.
+        const entry = { ...sampleEntry(data.nBase, data.nEval, data.dim), dataset: data };
+        setEntries((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
       })
       .catch((err: unknown) => {
         if (!cancelled) setErrors([`startup failed: ${String(err)}`]);
       });
+
+    // The importable list is a nicety; a failure must not block startup.
+    loadRegistry()
+      .then((registry) => {
+        if (cancelled) return;
+        setBaseUrl(registry.base_url);
+        const rows = registry.datasets.map(benchmarkEntry);
+        setEntries((prev) => [...prev, ...rows.filter((r) => !prev.some((e) => e.id === r.id))]);
+      })
+      .catch(() => undefined);
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Reset params when the family changes, and drop results that described the
-  // previous quantizer.
   useEffect(() => {
-    const family = quantizers.find((q) => q.key === selected);
+    const family = quantizers.find((q) => q.key === selectedFamily);
     if (!family) return;
     setParams(Object.fromEntries(family.params.map((p) => [p, defaultValue(p)])));
-    setResults(null);
+    setResults({});
     setErrors([]);
     setElapsed(null);
-  }, [selected, quantizers]);
+  }, [selectedFamily, quantizers]);
 
   useEffect(() => {
-    setResults(null);
+    setResults({});
     setErrors([]);
     setElapsed(null);
   }, [mode]);
@@ -140,7 +166,7 @@ function Playground() {
               return out;
             }),
           }
-        : { name: selected };
+        : { name: selectedFamily };
     if (mode === "family") {
       for (const [param, raw] of Object.entries(params)) {
         const value = toConfigValue(param, raw);
@@ -154,224 +180,376 @@ function Playground() {
       seed: SEED,
       n_reconstruct: 200,
     };
-  }, [mode, selected, params, stages]);
+  }, [mode, selectedFamily, params, stages]);
 
-  // The form drives the editor. `configText` is what actually runs, so hand
-  // edits survive until the form changes again.
   useEffect(() => {
     setConfigText(JSON.stringify(formConfig, null, 2));
   }, [formConfig]);
 
+  const chosen = useMemo(
+    () => entries.filter((e) => selected.includes(e.id)),
+    [entries, selected],
+  );
+  // Validation needs a dimension; any loaded one will do, since each dataset is
+  // validated again on its own before it runs.
+  const validationDim = chosen.find((e) => e.dataset)?.dataset?.dim ?? 0;
+
   const validate = useCallback(
     async (config: string): Promise<string[]> => {
-      if (!dataset) return [];
       try {
-        const check = await runner().validate(config, dataset.dim);
+        const check = await runner().validate(config, validationDim);
         return check.ok ? [] : check.errors;
       } catch (err: unknown) {
         return [String(err)];
       }
     },
-    [dataset],
+    [validationDim],
   );
 
-  const onFile = useCallback(
-    async (file: File) => {
+  const report = useCallback(
+    (id: string, stage: string, done: number, total: number) =>
+      setProgress((prev) => ({ ...prev, [id]: { stage, done, total } })),
+    [],
+  );
+
+  /**
+   * Make sure an entry's vectors are in memory, reading them if not.
+   *
+   * Reading happens in the worker: a large parse would freeze the page, and the
+   * remote reader's byte-range fetches use synchronous XHR, which browsers only
+   * allow off the main thread.
+   */
+  const ensureLoaded = useCallback(
+    async (entry: Entry): Promise<Entry> => {
+      if (entry.dataset) return entry;
+      const source =
+        entry.source.kind === "custom"
+          ? ({ kind: "file", file: entry.source.file } as const)
+          : ({ kind: "url", url: datasetUrl(baseUrl, (entry.source as { remote: { name: string } }).remote.name) } as const);
+
+      const loaded = (await runner().loadDataset(
+        source,
+        loadOptions,
+        Comlink.proxy((stage: string, done: number, total: number) =>
+          report(entry.id, stage, done, total),
+        ),
+      )) as LoadedFile;
+
+      const summary =
+        `${loaded.summary.sampledBase.toLocaleString()} of ` +
+        `${loaded.summary.fileBase.toLocaleString()} vectors · ${loaded.summary.dim}d · ` +
+        `ground truth ${loaded.summary.groundTruth}`;
+      const next: Entry = { ...entry, dataset: loaded.dataset, summary };
+      setEntries((prev) => prev.map((e) => (e.id === entry.id ? next : e)));
+      return next;
+    },
+    [baseUrl, loadOptions, report],
+  );
+
+  const onImport = useCallback(
+    async (id: string) => {
+      const entry = entries.find((e) => e.id === id);
+      if (!entry || entry.dataset) return;
       setErrors([]);
-      setResults(null);
       try {
-        const loaded = await loadH5(
-          file,
-          {
-            ...loadOptions,
-            onProgress: (stage, done, total) =>
-              setLoadingStage(total > 1 ? `${stage} ${done}/${total}` : stage),
-          },
-          // Ground truth is computed by vq-bench in the worker, never in JS.
-          (base, evalQueries, dim, l) =>
-            runner().topNeighbors(
-              base,
-              evalQueries,
-              dim,
-              l,
-              Comlink.proxy((done: number, total: number) =>
-                setLoadingStage(`ground truth ${done}/${total}`),
-              ),
-            ) as Promise<Uint32Array>,
-        );
-        setLoadedFile(loaded);
+        await ensureLoaded(entry);
+        // Ticking it is the obvious next step, so do it for them.
+        setSelected((prev) => (prev.includes(id) ? prev : [...prev, id]));
       } catch (err: unknown) {
-        setErrors([`could not read ${file.name}: ${(err as Error).message ?? String(err)}`]);
-      } finally {
-        setLoadingStage(null);
+        setErrors([`${entry.title}: ${(err as Error).message ?? String(err)}`]);
+        // Clear the bar so the row offers `import` again rather than sticking
+        // on "importing…".
+        setProgress((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
       }
     },
-    [loadOptions],
+    [ensureLoaded, entries],
   );
 
+  const onAddFile = useCallback((file: File) => {
+    const entry = customEntry(file);
+    // The file joins the list like any other row -- unticked, with an `import`
+    // button -- so opening a 2 GB file by mistake costs nothing until asked.
+    setEntries((prev) => (prev.some((e) => e.id === entry.id) ? prev : [...prev, entry]));
+  }, []);
+
   const onRun = useCallback(async () => {
-    if (!dataset) return;
+    if (chosen.length === 0) {
+      setErrors(["Select at least one dataset to run against."]);
+      return;
+    }
     setBusy(true);
     setErrors([]);
+    setResults({});
+    setProgress({});
     const started = performance.now();
+    const collected: Record<string, MethodResult[]> = {};
+    const problems: string[] = [];
+
     try {
-      const check = await runner().validate(configText, dataset.dim);
-      if (!check.ok) {
-        setErrors(check.errors);
-        setResults(null);
-        return;
+      // Sequential rather than parallel: one wasm worker, and running several
+      // datasets at once would only interleave their progress confusingly.
+      for (const entry of chosen) {
+        try {
+          // Only imported datasets are selectable, so this is a guard, not a
+          // path the UI can reach.
+          const vectors = entry.dataset;
+          if (!vectors) continue;
+
+          report(entry.id, "validating", 0, 0);
+          const check = await runner().validate(configText, vectors.dim);
+          if (!check.ok) {
+            problems.push(...check.errors.map((e) => `${entry.title}: ${e}`));
+            continue;
+          }
+
+          report(entry.id, "running", 0, 0);
+          const out = await runner().run(configText, vectors);
+          if (!out.ok) {
+            problems.push(...out.errors.map((e) => `${entry.title}: ${e}`));
+            continue;
+          }
+          collected[entry.id] = out.results;
+          report(entry.id, "done", 1, 1);
+        } catch (err: unknown) {
+          problems.push(`${entry.title}: ${(err as Error).message ?? String(err)}`);
+        }
       }
-      const out = await runner().run(configText, dataset);
-      if (!out.ok) {
-        setErrors(out.errors);
-        setResults(null);
-        return;
-      }
+
       const seconds = (performance.now() - started) / 1000;
-      setResults(out.results);
+      setResults(collected);
+      setErrors(problems);
       setElapsed(seconds);
 
-      // Only the scores and the config that made them -- never the vectors.
-      const record: RunRecord = {
-        id: Date.now(),
-        config: configText,
-        dataset: datasetName,
-        results: out.results,
-        elapsedSeconds: seconds,
-      };
-      await saveRun(record);
+      // One stored run per dataset, so each carries the reference curve it
+      // should be read against.
+      const written: number[] = [];
+      for (const [id, rows] of Object.entries(collected)) {
+        const entry = entries.find((e) => e.id === id);
+        const runId = Date.now() + written.length;
+        written.push(runId);
+        await saveRun({
+          id: runId,
+          config: configText,
+          dataset: entry?.title ?? id,
+          benchmarkDataset: entry?.benchmarkKey ?? null,
+          results: rows,
+          elapsedSeconds: seconds,
+        });
+      }
+      setCurrentRunIds(written);
       setRuns(await listRuns());
-    } catch (err: unknown) {
-      setErrors([String(err)]);
     } finally {
       setBusy(false);
+      // Leave the bars up: they say which datasets the results came from.
     }
-  }, [configText, dataset, datasetName]);
+  }, [chosen, configText, entries, report]);
 
-  const ready = quantizers.length > 0 && dataset !== null;
+  const ready = quantizers.length > 0 && entries.length > 0;
+  const resultEntries = Object.entries(results);
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
-          <div className="space-y-6">
-            <Panel title="Quantizer">
-              <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-0.5">
-                {(["family", "custom"] as const).map((option) => (
-                  <button
-                    key={option}
-                    onClick={() => setMode(option)}
-                    className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                      mode === option
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-500 hover:text-slate-800"
-                    }`}
-                  >
-                    {option === "family" ? "Built-in" : "Compose"}
-                  </button>
-                ))}
-              </div>
-
-              {!ready ? (
-                <p className="text-sm text-slate-500">Loading…</p>
-              ) : mode === "family" ? (
-                <MethodPicker
-                  quantizers={quantizers}
-                  selected={selected}
-                  params={params}
-                  onSelect={setSelected}
-                  onParamChange={(param, value) =>
-                    setParams((prev) => ({ ...prev, [param]: value }))
-                  }
-                />
-              ) : (
-                <PipelineBuilder
-                  primitives={primitives}
-                  stages={stages}
-                  onChange={setStages}
-                />
-              )}
-            </Panel>
-
-            <Panel title="Dataset">
-              <DatasetPicker
-                sampleName={SAMPLE_DATASET.name}
-                sampleDescribe={SAMPLE_DATASET.describe}
-                loaded={loadedFile}
-                options={loadOptions}
-                busy={loadingStage}
-                onOptionsChange={setLoadOptions}
-                onFile={onFile}
-                onUseSample={() => setLoadedFile(null)}
-              />
-            </Panel>
-
-            <Panel title="History">
-              <RunHistory
-                runs={runs}
-                onRestore={(run) => {
-                  setConfigText(run.config);
-                  setResults(run.results);
-                  setElapsed(run.elapsedSeconds);
-                  setErrors([]);
-                }}
-                onDelete={async (id) => {
-                  await deleteRun(id);
-                  setRuns(await listRuns());
-                }}
-                onClear={async () => {
-                  await clearRuns();
-                  setRuns([]);
-                }}
-              />
-            </Panel>
-          </div>
-
-          {/* min-w-0 lets this column shrink below its content, so the results
-              table scrolls inside its card instead of widening the page. */}
-          <div className="min-w-0 space-y-6">
-            <Panel title="Config">
-              <ConfigEditor value={configText} onChange={setConfigText} validate={validate} />
-              <button
-                onClick={onRun}
-                disabled={busy || !ready}
-                className="mt-3 w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium
-                           text-white hover:bg-slate-700 disabled:cursor-not-allowed
-                           disabled:bg-slate-300"
-              >
-                {busy ? "Running…" : "Run"}
-              </button>
-            </Panel>
-
-            {errors.length > 0 && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                <h2 className="text-sm font-medium text-red-800">Config rejected</h2>
-                <ul className="mt-2 space-y-1">
-                  {errors.map((error) => (
-                    <li key={error} className="font-mono text-xs break-words text-red-700">
-                      {error}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {results && results.length > 0 && (
-              <>
-                <Panel
-                  title="Results"
-                  aside={elapsed !== null ? `${elapsed.toFixed(2)}s` : undefined}
+    <div className="mx-auto max-w-[110rem] px-6 py-8">
+      <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
+        <div className="space-y-6">
+          <Panel title="Quantizer">
+            <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-0.5">
+              {(["family", "custom"] as const).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => setMode(option)}
+                  className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    mode === option
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
                 >
-                  <ResultsTable results={results} />
-                </Panel>
+                  {option === "family" ? "Built-in" : "Compose"}
+                </button>
+              ))}
+            </div>
 
-                <Panel title="Against the benchmark">
-                  <SotaOverlay results={results} k={DEFAULT_KS[DEFAULT_KS.length - 1]} />
-                </Panel>
-              </>
+            {!ready ? (
+              <p className="text-sm text-slate-500">Loading…</p>
+            ) : mode === "family" ? (
+              <MethodPicker
+                quantizers={quantizers}
+                selected={selectedFamily}
+                params={params}
+                onSelect={setSelectedFamily}
+                onParamChange={(param, value) =>
+                  setParams((prev) => ({ ...prev, [param]: value }))
+                }
+              />
+            ) : (
+              <PipelineBuilder primitives={primitives} stages={stages} onChange={setStages} />
             )}
+          </Panel>
+
+          <Panel
+            title="Datasets"
+            aside={selected.length > 1 ? `${selected.length} selected` : undefined}
+          >
+            <DatasetList
+              entries={entries}
+              selected={selected}
+              progress={progress}
+              disabled={busy}
+              onToggle={(id) =>
+                setSelected((prev) =>
+                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                )
+              }
+              onImport={onImport}
+              onAddFile={onAddFile}
+            />
+
+            <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+              <SampleSize
+                label="n_base"
+                hint="rows"
+                value={loadOptions.nBase}
+                onChange={(nBase) => setLoadOptions((o) => ({ ...o, nBase }))}
+              />
+              <SampleSize
+                label="n_eval"
+                hint="queries"
+                value={loadOptions.nEval}
+                onChange={(nEval) => setLoadOptions((o) => ({ ...o, nEval }))}
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Applies when a dataset is first read. Rows are sampled uniformly at random,
+              seeded — the same dataset and settings give the same subset.
+            </p>
+          </Panel>
+
+          <Panel title="History">
+            <RunHistory
+              runs={runs}
+              onRestore={(run) => {
+                setConfigText(run.config);
+                setResults({ [`saved:${run.id}`]: run.results });
+                setElapsed(run.elapsedSeconds);
+                setErrors([]);
+              }}
+              onDelete={async (id) => {
+                await deleteRun(id);
+                setRuns(await listRuns());
+              }}
+              onClear={async () => {
+                await clearRuns();
+                setRuns([]);
+              }}
+            />
+          </Panel>
+        </div>
+
+        <div className="min-w-0 space-y-6">
+          <button
+            onClick={onRun}
+            disabled={busy || !ready}
+            className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium
+                       text-white hover:bg-slate-700 disabled:cursor-not-allowed
+                       disabled:bg-slate-300"
+          >
+            {busy
+              ? "Running…"
+              : `Run on ${selected.length} dataset${selected.length === 1 ? "" : "s"}`}
+          </button>
+
+          {errors.length > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+              <h2 className="text-sm font-medium text-red-800">
+                {errors.length === 1 ? "A problem" : `${errors.length} problems`}
+              </h2>
+              <ul className="mt-2 space-y-1">
+                {errors.map((error) => (
+                  <li key={error} className="font-mono text-xs break-words text-red-700">
+                    {error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* One results block per dataset, each named and each plotted against
+              its own reference curves -- a single merged table would hide which
+              dataset a number came from. */}
+          {resultEntries.map(([id, rows]) => {
+            const entry = entries.find((e) => e.id === id);
+            const title = entry?.title ?? "saved run";
+            return (
+              <Panel
+                key={id}
+                title={title}
+                aside={elapsed !== null ? `${elapsed.toFixed(2)}s total` : undefined}
+              >
+                <SotaOverlay
+                  results={rows}
+                  k={DEFAULT_KS[DEFAULT_KS.length - 1]}
+                  benchmarkDataset={entry?.benchmarkKey ?? null}
+                  datasetLabel={title}
+                  // Everything but this run, which is drawn as the subject.
+                  history={runs.filter((r) => !currentRunIds.includes(r.id))}
+                />
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <ResultsTable results={rows} />
+                </div>
+              </Panel>
+            );
+          })}
+
+          <section className="min-w-0 rounded-lg border border-slate-200 bg-white">
+            <details open={configOpen} onToggle={(e) => setConfigOpen(e.currentTarget.open)}>
+              <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-slate-700
+                                  hover:text-slate-900">
+                Config
+                <span className="ml-2 font-normal text-slate-400">
+                  {configOpen ? "" : "the JSON this run sends to vq-bench"}
+                </span>
+              </summary>
+              <div className="px-5 pb-5">
+                <ConfigEditor value={configText} onChange={setConfigText} validate={validate} />
+              </div>
+            </details>
+          </section>
         </div>
       </div>
     </div>
+  );
+}
+
+/** A sample-size field; both are plain positive integers. */
+function SampleSize({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-slate-700">
+        {label}
+        <span className="ml-1.5 font-normal text-slate-400">{hint}</span>
+      </span>
+      <input
+        type="number"
+        min={1}
+        value={value}
+        onChange={(e) => onChange(Math.max(1, Number(e.target.value) || 1))}
+        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm
+                   focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none"
+      />
+    </label>
   );
 }
 

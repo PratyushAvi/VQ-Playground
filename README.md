@@ -70,6 +70,19 @@ exact top-L is brute-forced by vq-bench through the WASM boundary, never in JS.
 Runs are kept in IndexedDB on your device: the config, the scores, and how long it took.
 Never the vectors, and never the file.
 
+### Importing a benchmark dataset
+
+The ten VIBE datasets can be imported straight from the playground — no upload, and no
+download either. They run from 350 MB to 34 GB, far past what a browser can hold, so they
+are read over HTTP byte ranges: HDF5 asks for the chunks covering the rows you sampled and
+nothing else. Importing 2,000 rows of the 350 MB `llama` set transfers about 0.1 MB in ~130
+requests.
+
+Datasets must be imported before they can be selected, and several can run at once — each
+shows its own progress bar and gets its own results panel, so a number is never ambiguous
+about which vectors produced it. Your own `.h5` joins the same list (a local file has no
+range endpoint, so that one is still read whole, and warns past 500 MB).
+
 ### Comparing against the benchmark
 
 The landing page plots the five strongest quantizer families from the published vq-bench
@@ -81,8 +94,12 @@ Those curves come from `tools/extract_sota.py`, which distills the fork's own
 It is bundled as a static asset, so the comparison works offline like everything else.
 Re-run it after syncing the fork to pick up a newer benchmark run.
 
-The overlay compares *your* vectors against results measured on someone else's, so it is
-labelled as shape-against-shape rather than a like-for-like score.
+When a run used an imported benchmark dataset, the overlay defaults to *that* dataset's
+published curves and says the comparison is direct. Otherwise it compares your vectors
+against results measured on someone else's, and says so — shape against shape, not a
+like-for-like score. Earlier runs on the same dataset are drawn behind the current one,
+merged into one curve per quantizer family, so a sweep explored one run at a time still
+reads as a curve. Both layers are remembered across visits.
 
 ### Composing your own quantizer
 

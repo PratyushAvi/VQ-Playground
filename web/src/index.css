@@ -18,6 +18,8 @@
   --series-5: #e87ba4;
   --series-6: #4a3aa7;
   --series-mine: #0b0b0b;
+  /* Earlier runs: present as context, never competing with the subject. */
+  --series-muted: #94a3b8;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -30,6 +32,7 @@
     --series-5: #d55181;
     --series-6: #9085e9;
     --series-mine: #ffffff;
+    --series-muted: #64748b;
   }
 }
 
@@ -42,4 +45,5 @@
   --series-5: #d55181;
   --series-6: #9085e9;
   --series-mine: #ffffff;
+  --series-muted: #64748b;
 }

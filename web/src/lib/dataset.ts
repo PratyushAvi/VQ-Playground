@@ -7,6 +7,33 @@
 
 import type { Dataset } from "./types";
 
+/** One dataset importable straight from the VIBE repo. */
+export type RemoteDataset = {
+  name: string;
+  dim: number;
+  n_base: number | null;
+};
+
+type Registry = { base_url: string; datasets: RemoteDataset[] };
+
+let registry: Promise<Registry> | null = null;
+
+/**
+ * The importable dataset list, generated from vq-bench's own registry by
+ * tools/extract_sota.py so the two cannot drift.
+ */
+export function loadRegistry(): Promise<Registry> {
+  registry ??= fetch("data/datasets.json").then((r) => {
+    if (!r.ok) throw new Error(`could not load the dataset list (${r.status})`);
+    return r.json() as Promise<Registry>;
+  });
+  return registry;
+}
+
+export function datasetUrl(base: string, name: string): string {
+  return `${base}/${name}.hdf5`;
+}
+
 type Meta = {
   n_base: number;
   n_eval: number;

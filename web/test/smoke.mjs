@@ -58,6 +58,13 @@ await page.getByRole("button", { name: "Open the playground" }).click();
 await page.waitForSelector("select", { timeout: 30000 });
 check("the playground opens", (await page.evaluate(() => location.hash)) === "#playground", "wrong hash");
 
+await page.waitForFunction(() => document.querySelectorAll('input[type="checkbox"]').length > 5,
+  null, { timeout: 20000 });
+const rows = await page.locator('input[type="checkbox"]').count();
+check("the sample and the benchmark datasets are listed together", rows === 11, `${rows} rows`);
+const first = await page.locator("li").first().innerText();
+check("the random point set is first", /random point set/.test(first), first.replace(/\s+/g, " "));
+
 const families = await page.locator("select").first().locator("option").count();
 check("registry populates the dropdown", families === 15, `${families} families`);
 
@@ -69,7 +76,7 @@ for (const { key, label, recall10 } of EXPECTED) {
   const stale = await page.locator("tbody tr").count();
   check(`${key}: previous results cleared`, stale === 0, `${stale} rows left over`);
 
-  await page.getByRole("button", { name: /^run$/i }).click();
+  await page.getByRole("button", { name: /^Run on/ }).click();
   await page.waitForSelector(`tbody tr:has-text("${label}")`, { timeout: 180000 });
 
   const cells = await page.locator("tbody tr").first().locator("td").allInnerTexts();
@@ -82,14 +89,14 @@ for (const { key, label, recall10 } of EXPECTED) {
 await page.selectOption("select", "minmax");
 await page.waitForTimeout(200);
 await page.locator('input[inputmode="numeric"]').first().fill("99");
-await page.getByRole("button", { name: /^run$/i }).click();
-await page.waitForSelector("text=/Config rejected/", { timeout: 60000 });
+await page.getByRole("button", { name: /^Run on/ }).click();
+await page.waitForSelector("li.font-mono", { timeout: 60000 });
 const message = await page.locator("li.font-mono").first().innerText();
 check("invalid param reports vq-bench's reason", /b must be in 1..=8/.test(message), message);
 
 // A sweep should produce one row per value.
 await page.locator('input[inputmode="numeric"]').first().fill("2, 4, 6");
-await page.getByRole("button", { name: /^run$/i }).click();
+await page.getByRole("button", { name: /^Run on/ }).click();
 await page.waitForFunction(() => document.querySelectorAll("tbody tr").length === 3,
   null, { timeout: 120000 });
 check("a swept param runs once per value", true, "3 rows");
@@ -106,7 +113,7 @@ check("config editor is present", await page.locator(".cm-content").count() === 
 // A run must be remembered, and survive a reload.
 await page.selectOption("select", "minmax");
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /^run$/i }).click();
+await page.getByRole("button", { name: /^Run on/ }).click();
 await page.waitForSelector('tbody tr:has-text("MinMax")', { timeout: 120000 });
 await page.waitForSelector("text=/run.? on this device/", { timeout: 15000 });
 await page.reload({ waitUntil: "networkidle" });
@@ -116,34 +123,63 @@ check("runs persist across a reload", remembered === 1, "history empty after rel
 
 // Both `.h5` layouts load, and a file with neither is refused clearly.
 for (const [file, layout, truth] of [
-  ["test/data/harness.h5", "harness layout", "from file"],
-  ["test/data/vibe_no_neighbors.h5", "vibe layout", "brute-forced"],
+  ["test/data/harness.h5", "harness", "from file"],
+  ["test/data/vibe_no_neighbors.h5", "vibe", "brute-forced"],
 ]) {
+  await page.getByRole("button", { name: /use your own/ }).click();
   await page.locator('input[type="file"]').setInputFiles(file);
-  await page.waitForSelector(`text=/${layout}/`, { timeout: 180000 });
-  const summary = await page.locator(`text=/${layout}/`).locator("..").innerText();
-  check(`${layout} detected, ground truth ${truth}`, summary.includes(truth), summary);
 
-  await page.getByRole("button", { name: /^run$/i }).click();
-  await page.waitForFunction(() => document.querySelectorAll("tbody tr").length > 0,
-    null, { timeout: 180000 });
-  check(`${layout}: runs`, true, "");
+  // The file joins the list unimported; importing is an explicit click, and
+  // the row becomes tickable only once that succeeds.
+  const row = page.locator("li").filter({ hasText: file.split("/").pop() }).first();
+  await row.getByRole("button", { name: /^import$/ }).click();
+  await page.waitForFunction(
+    (name) => {
+      const li = [...document.querySelectorAll("li")].find((n) => n.textContent?.includes(name));
+      const box = li?.querySelector('input[type="checkbox"]');
+      return box instanceof HTMLInputElement && !box.disabled;
+    },
+    file.split("/").pop(),
+    { timeout: 300000 },
+  );
+  const summary = await row.innerText();
+  check(
+    `${layout} layout: imports, ground truth ${truth}`,
+    summary.includes(truth),
+    summary.replace(/\s+/g, " "),
+  );
+
+  // Only this dataset, so the run's results are unambiguous.
+  await page.locator("li").first().locator('input[type="checkbox"]').uncheck();
+  await page.getByRole("button", { name: /^Run on/ }).click();
+  await page.waitForFunction(() => document.querySelectorAll("table").length > 0,
+    null, { timeout: 300000 });
+  check(`${layout} layout: runs`, true, "");
+
+  await row.locator('input[type="checkbox"]').uncheck();
+  await page.locator("li").first().locator('input[type="checkbox"]').check();
 }
 
+await page.getByRole("button", { name: /use your own/ }).click();
 await page.locator('input[type="file"]').setInputFiles("test/data/wrong.h5");
-await page.waitForSelector("text=/unrecognized layout/", { timeout: 60000 });
+await page.locator("li").filter({ hasText: "wrong.h5" }).first()
+  .getByRole("button", { name: /^import$/ }).click();
+await page.waitForSelector("text=/unrecognized layout/", { timeout: 120000 });
 check("an unrecognized layout is refused with a clear reason", true, "");
+const badBox = page.locator("li").filter({ hasText: "wrong.h5" }).first()
+  .locator('input[type="checkbox"]');
+check("a dataset that failed to import stays unselectable", await badBox.isDisabled(), "it was tickable");
 
 // --- Custom pipelines ---
-// Back to the sample dataset, so the composed chain is compared against the
+// The sample dataset only, so the composed chain is compared against the
 // built-in on identical vectors.
-await page.locator("text=/back to the sample dataset/").click();
+await page.locator("li").first().locator('input[type="checkbox"]').check();
 await page.waitForTimeout(200);
 
 await page.getByRole("button", { name: "Built-in" }).click();
 await page.selectOption("select", "minmax");
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /^run$/i }).click();
+await page.getByRole("button", { name: /^Run on/ }).click();
 await page.waitForSelector('tbody tr:has-text("MinMax (b=4)")', { timeout: 120000 });
 const builtinRow = await page.locator("tbody tr").first().innerText();
 
@@ -156,7 +192,7 @@ await page.locator("select").last().selectOption("cast_uint");
 await page.waitForTimeout(200);
 check("stages can be added", await page.locator("ol li").count() === 2, "expected 2 stages");
 
-await page.getByRole("button", { name: /^run$/i }).click();
+await page.getByRole("button", { name: /^Run on/ }).click();
 await page.waitForSelector('tbody tr:has-text("custom")', { timeout: 120000 });
 const composedRow = await page.locator("tbody tr").first().innerText();
 
@@ -174,8 +210,8 @@ check(
 const bits = page.locator("ol li").last().locator("input");
 await bits.fill("99");
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /^run$/i }).click();
-await page.waitForSelector("text=/Config rejected/", { timeout: 60000 });
+await page.getByRole("button", { name: /^Run on/ }).click();
+await page.waitForSelector("li.font-mono", { timeout: 60000 });
 const stageError = await page.locator("li.font-mono").first().innerText();
 check(
   "a bad stage param names the stage and the reason",
@@ -184,28 +220,46 @@ check(
 );
 
 // --- The benchmark overlay ---
-await page.locator("text=/back to the sample dataset/").click().catch(() => {});
-await page.waitForTimeout(200);
 await page.getByRole("button", { name: "Built-in" }).click();
 await page.selectOption("select", "minmax");
 await page.waitForTimeout(200);
 await page.locator('input[inputmode="numeric"]').first().fill("2, 4, 6");
-await page.getByRole("button", { name: /^run$/i }).click();
+await page.getByRole("button", { name: /^Run on/ }).click();
 await page.waitForFunction(() => document.querySelectorAll("tbody tr").length === 3, null, { timeout: 120000 });
-await page.waitForSelector("text=/Against the benchmark/", { timeout: 20000 });
+// The overlay lives inside each dataset's own results panel now.
+await page.waitForSelector("figure", { timeout: 20000 });
 
+// Earlier runs in this suite are legitimately in the legend too, so assert on
+// what must be there rather than an exact count.
 const overlay = await page.locator("figure ul li").allInnerTexts();
 check(
-  "the overlay plots your run against the published curves",
-  overlay.length === 6 && overlay.some((t) => /your run/.test(t)),
+  "the overlay plots this run alongside earlier ones",
+  overlay.some((t) => /this run/.test(t)) && overlay.some((t) => /earlier/.test(t)),
   overlay.join(", "),
 );
 
-// The overlay must be optional: unchecking leaves only the reader's own curve.
-await page.locator('input[type="checkbox"]').first().uncheck();
-await page.waitForTimeout(200);
+// Both layers are optional; turning them off leaves only the current run.
+// The labels name them, which is steadier than positional indexes.
+await page.locator("label").filter({ hasText: "overlay published results" }).first()
+  .locator("input").uncheck();
+const earlierToggle = page.locator("label").filter({ hasText: "earlier runs" }).first();
+if (await earlierToggle.count()) await earlierToggle.locator("input").uncheck();
+await page.waitForTimeout(300);
 const alone = await page.locator("figure ul li").allInnerTexts();
-check("the overlay can be turned off", alone.length === 1, alone.join(", "));
+check("both overlay layers can be turned off", alone.length === 1, alone.join(", "));
+
+// And the choice survives a reload, since it is stored per browser.
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll('input[type="checkbox"]').length > 5,
+  null, { timeout: 30000 });
+await page.getByRole("button", { name: /^Run on/ }).click();
+await page.waitForSelector("figure", { timeout: 120000 });
+const afterReload = await page.locator("figure ul li").allInnerTexts();
+check(
+  "the overlay setting persists across a reload",
+  afterReload.length === 1,
+  afterReload.join(", "),
+);
 
 check("no console or page errors", problems.length === 0, problems.join("; "));
 

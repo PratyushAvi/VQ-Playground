@@ -8,6 +8,13 @@ import { useEffect, useState } from "react";
 
 import { TradeoffChart, type Series } from "./TradeoffChart";
 import { loadSota, shortName, type Sota } from "../lib/sota";
+import {
+  DEFAULT_OVERLAY,
+  loadOverlayPrefs,
+  saveOverlayPrefs,
+  type OverlayPrefs,
+  type RunRecord,
+} from "../lib/history";
 import type { MethodResult } from "../lib/types";
 
 type Props = {
@@ -15,7 +22,47 @@ type Props = {
   results: MethodResult[];
   /** Which k the recall column reports; the reference curves are recall@10. */
   k?: number;
+  /**
+   * The benchmark dataset these results were produced on, when they were. The
+   * overlay then defaults to *that* dataset's curves, which is the only
+   * genuinely like-for-like comparison available.
+   */
+  benchmarkDataset?: string | null;
+  /** Earlier runs on this same dataset, drawn faintly behind the current one. */
+  history?: RunRecord[];
+  /** Names this dataset in the history, so past runs on it can be found. */
+  datasetLabel?: string;
 };
+
+/** The family a method label names: `MinMax (b=4)` -> `MinMax`. */
+function familyOf(label: string): string {
+  return label.split(" (")[0];
+}
+
+/**
+ * Merge past runs into one series per quantizer family, ordered by bit rate.
+ * Points at the same bit rate keep the most recent, so re-running a setting
+ * replaces its old value rather than doubling the line back on itself.
+ */
+function collectByFamily(
+  past: { run: RunRecord; points: { bits: number; recall: number; label: string }[] }[],
+): Series[] {
+  const families = new Map<string, Map<number, { bits: number; recall: number; label: string }>>();
+  // Oldest first, so a later run overwrites an earlier one at the same rate.
+  for (const { points: rows } of [...past].reverse()) {
+    for (const point of rows) {
+      const family = familyOf(point.label);
+      const byBits = families.get(family) ?? new Map();
+      byBits.set(Number(point.bits.toFixed(4)), point);
+      families.set(family, byBits);
+    }
+  }
+  return [...families.entries()].map(([family, byBits]) => ({
+    name: `${family} (earlier)`,
+    points: [...byBits.values()].sort((a, b) => a.bits - b.bits),
+    muted: true,
+  }));
+}
 
 /** Pull `(bits, recall@k)` out of a result row, when it has both. */
 function points(results: MethodResult[], k: number) {
@@ -30,16 +77,46 @@ function points(results: MethodResult[], k: number) {
     .sort((a, b) => a.bits - b.bits);
 }
 
-export function SotaOverlay({ results, k = 10 }: Props) {
+export function SotaOverlay({
+  results,
+  k = 10,
+  benchmarkDataset,
+  history = [],
+  datasetLabel,
+}: Props) {
   const [sota, setSota] = useState<Sota | null>(null);
-  const [dataset, setDataset] = useState("arxiv-nomic-768-normalized");
-  const [show, setShow] = useState(true);
+  const [prefs, setPrefs] = useState<OverlayPrefs | null>(null);
 
   useEffect(() => {
     loadSota().then(setSota).catch(() => undefined);
+    loadOverlayPrefs().then(setPrefs);
   }, []);
 
+  // Persist as the reader changes it, so the overlay comes back configured.
+  function update(change: Partial<OverlayPrefs>) {
+    const next: OverlayPrefs = { ...(prefs ?? DEFAULT_OVERLAY), ...change };
+    setPrefs(next);
+    void saveOverlayPrefs(next);
+  }
+
+  const show = prefs?.show ?? true;
+  const showHistory = prefs?.history ?? true;
+  // A pinned dataset wins; otherwise follow the run's own, falling back to a
+  // default only when the run came from vectors with no benchmark counterpart.
+  const following = prefs?.dataset === null || prefs?.dataset === undefined;
+  const dataset = prefs?.dataset ?? benchmarkDataset ?? null;
+
   const mine = points(results, k);
+
+  // Earlier runs on this same dataset. Only those with points to plot, and
+  // never the current one -- it is drawn separately and emphasised.
+  const past = datasetLabel
+    ? history
+        .filter((run) => run.dataset === datasetLabel)
+        .map((run) => ({ run, points: points(run.results, k) }))
+        .filter(({ points: p }) => p.length > 0)
+        .slice(0, 40)
+    : [];
   if (mine.length === 0) {
     return (
       <p className="text-xs text-slate-400">
@@ -49,7 +126,7 @@ export function SotaOverlay({ results, k = 10 }: Props) {
     );
   }
 
-  const entry = sota?.datasets[dataset];
+  const entry = dataset === null ? undefined : sota?.datasets[dataset];
   const reference: Series[] =
     show && entry
       ? Object.entries(entry.curves).map(([name, curve]) => ({
@@ -58,6 +135,12 @@ export function SotaOverlay({ results, k = 10 }: Props) {
         }))
       : [];
 
+  // Earlier runs are collapsed into one muted series per quantizer family
+  // rather than one per run: sweeping `b` across several runs is the usual way
+  // to explore, and each of those runs alone is a single point. Joined by
+  // family they form the tradeoff curve the reader was actually building.
+  const earlier: Series[] = showHistory ? collectByFamily(past) : [];
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -65,18 +148,23 @@ export function SotaOverlay({ results, k = 10 }: Props) {
           <input
             type="checkbox"
             checked={show}
-            onChange={(e) => setShow(e.target.checked)}
+            onChange={(e) => update({ show: e.target.checked })}
             className="rounded border-slate-300"
           />
           overlay published results
         </label>
         {show && sota && (
           <select
-            value={dataset}
-            onChange={(e) => setDataset(e.target.value)}
+            value={following || dataset === null ? "" : dataset}
+            onChange={(e) => update({ dataset: e.target.value === "" ? null : e.target.value })}
             className="rounded border border-slate-300 bg-white px-2 py-1 text-xs
                        focus:border-slate-500 focus:outline-none"
           >
+            <option value="">
+              {benchmarkDataset
+                ? `match the run (${shortName(benchmarkDataset, sota.datasets[benchmarkDataset]?.dim ?? 0)})`
+                : "match the run — none published"}
+            </option>
             {Object.entries(sota.datasets).map(([key, value]) => (
               <option key={key} value={key}>
                 {shortName(key, value.dim)}
@@ -84,21 +172,53 @@ export function SotaOverlay({ results, k = 10 }: Props) {
             ))}
           </select>
         )}
+        {past.length > 0 && (
+          <label className="flex items-center gap-1.5 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => update({ history: e.target.checked })}
+              className="rounded border-slate-300"
+            />
+            earlier runs ({past.length})
+          </label>
+        )}
+        {show && following && benchmarkDataset && (
+          <span className="text-xs text-slate-400">same vectors as the benchmark</span>
+        )}
       </div>
 
+      {show && dataset === null && (
+        <p className="mb-2 text-xs text-slate-500">
+          These vectors have no published counterpart, so there is nothing to compare
+          against by default. Pick a dataset above to plot its curves behind yours — the
+          comparison then reads as shape against shape, not a like-for-like score.
+        </p>
+      )}
+
       <TradeoffChart
-        series={[...reference, { name: "your run", points: mine, emphasis: true }]}
+        series={[...reference, ...earlier, { name: "this run", points: mine, emphasis: true }]}
         caption={`recall@${k} against bits per dimension — up and to the left is better`}
-        height={280}
+        height={340}
       />
 
       {show && entry && (
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
-          Reference curves are the published results on{" "}
-          {shortName(dataset, entry.dim)} ({entry.n_base.toLocaleString()} vectors at{" "}
-          {entry.dim}d). Your run used different vectors, so read the comparison as
-          shape against shape — where your curve sits relative to the frontier — rather
-          than as a like-for-like score.
+          Reference curves are the published results on {shortName(dataset ?? "", entry.dim)} (
+          {entry.n_base.toLocaleString()} vectors at {entry.dim}d).{" "}
+          {benchmarkDataset === dataset ? (
+            <>
+              Your run sampled the same dataset, so the curves are directly comparable —
+              though on a subsample, which usually reads a little higher than the full
+              base.
+            </>
+          ) : (
+            <>
+              Your run used different vectors, so read the comparison as shape against
+              shape — where your curve sits relative to the frontier — rather than as a
+              like-for-like score.
+            </>
+          )}
         </p>
       )}
     </div>

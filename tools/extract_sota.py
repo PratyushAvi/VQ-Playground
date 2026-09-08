@@ -14,6 +14,8 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "vendor/vq-bench/docs/results/aug-2026.json"
 DEST = ROOT / "web/public/data/sota.json"
+REGISTRY_SOURCE = ROOT / "vendor/vq-bench/src/bin/vqb/registry.rs"
+REGISTRY_DEST = ROOT / "web/public/data/datasets.json"
 
 # The five strongest families by mean recall@10 near 4 bits/dim, measured over
 # all ten datasets. EDEN-prod is omitted: it tracks EDEN-MSE to within 0.0001,
@@ -64,7 +66,34 @@ DEST.write_text(
     )
     + "\n"
 )
+# The importable dataset list, read out of the crate's own registry so the two
+# cannot drift. Sizes are not recorded: they are a property of the remote file,
+# and the loader reads them from a HEAD request at import time.
+import re
+
+rows = re.findall(
+    r'name:\s*"([^"]+)",\s*\n\s*dim:\s*(\d+)', REGISTRY_SOURCE.read_text()
+)
+REGISTRY_DEST.write_text(
+    json.dumps(
+        {
+            "base_url": "https://huggingface.co/datasets/vector-index-bench/vibe/resolve/main",
+            "datasets": [
+                {
+                    "name": name,
+                    "dim": int(dim),
+                    "n_base": datasets.get(name, {}).get("n_base"),
+                }
+                for name, dim in rows
+            ],
+        },
+        indent=1,
+    )
+    + "\n"
+)
+
 print(f"{DEST.relative_to(ROOT)}  {DEST.stat().st_size / 1024:.0f} KB")
+print(f"{REGISTRY_DEST.relative_to(ROOT)}  {len(rows)} datasets")
 for name, entry in datasets.items():
     counts = ", ".join(f"{f}:{len(p)}" for f, p in entry["curves"].items())
     print(f"  {name:36} {counts}")
