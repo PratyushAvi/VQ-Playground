@@ -22,6 +22,19 @@
       "sourceMaps": true
     },
     {
+      // VS Code's own Simple Browser needs no extension, but it cannot host a
+      // debugger. This opens Chrome with devtools docked instead, which is the
+      // closest thing to a live preview that still breaks on a breakpoint.
+      "name": "Playground (preview + devtools)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/web",
+      "preLaunchTask": "web: dev server",
+      "runtimeArgs": ["--auto-open-devtools-for-tabs"],
+      "sourceMaps": true
+    },
+    {
       // The Phase 0 headless harness -- same wasm code path, no browser.
       "name": "Headless run (Node)",
       "type": "node",

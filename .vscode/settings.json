@@ -3,6 +3,9 @@
   "rust-analyzer.linkedProjects": ["vendor/vq-bench/Cargo.toml"],
   // The wasm crate only type-checks meaningfully for its real target.
   "rust-analyzer.cargo.target": "wasm32-unknown-unknown",
+  // Simple Browser (Cmd+Shift+P > "Simple Browser: Show") renders the app in an
+  // editor tab. The lock indicator only gets in the way for a local preview.
+  "simpleBrowser.focusLockIndicator.enabled": false,
   "files.exclude": {
     "**/target": true,
     "**/node_modules": true,

@@ -150,6 +150,11 @@ families.
 Note that vq-bench checks *dimensions*, not sensibility: a chain with no rounder, or with
 two, will run. The builder warns about the first rather than blocking it.
 
+In VS Code, `Cmd+Shift+P` → **Simple Browser: Show** → `http://localhost:5173` renders the
+app in an editor tab beside the code, hot reload included; no extension needed. The
+**web: dev + preview** task starts the server first. For breakpoints instead, use the
+**Playground (preview + devtools)** launch configuration.
+
 To check the UI end to end (needs `npm run dev` in another terminal):
 
 ```sh
