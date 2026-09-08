@@ -14,8 +14,8 @@
  * Gambetta ships 300-700; Gambarino a single 400 cut and no bold. */
 @theme {
   /* The two roles the UI styles against. Change these, not the call sites. */
-  --font-body: "Gambetta", Georgia, "Times New Roman", serif;
-  --font-heading: "Open Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Open Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Gambetta", Georgia, "Times New Roman", serif;
   /* The other imported face, unused by default but ready to swap in. */
   --font-display-alt: "Gambarino", Georgia, serif;
 
@@ -40,25 +40,11 @@ h1 {
   font-weight: 700;
 }
 
-/* Boska is a display serif doing body duty, so it needs more line height than
-   a sans would at the same size to stay readable in a paragraph. */
-body {
-  line-height: 1.6;
-  /* Lining, tabular figures: Boska defaults to old-style numerals, which drop
-     4/6/9 below the baseline. Fine in prose, but a column of them will not
-     align, and a results table is read by scanning down that column. */
+/* Numerals line up down a column. Gambetta defaults to old-style figures,
+   which drop 4/6/9 below the baseline -- fine in prose, wrong in a table that
+   is read by scanning a column of numbers. */
+table {
   font-variant-numeric: lining-nums tabular-nums;
-}
-
-/* Dense numeric UI -- tables, axis ticks, the legend -- is where a display
-   serif thins out at 12px. Those parts take the sans instead; the prose keeps
-   Boska. */
-table,
-.viz-root,
-code,
-kbd,
-pre {
-  font-family: var(--font-heading);
 }
 
 /* Chart palette.

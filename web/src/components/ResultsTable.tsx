@@ -67,12 +67,24 @@ function format(key: string, value: number | undefined): string {
   return value.toPrecision(4);
 }
 
-export function ResultsTable({ results }: { results: MethodResult[] }) {
-  const columns = columnsFor(results);
+export function ResultsTable({
+  results,
+  compact = false,
+}: {
+  results: MethodResult[];
+  /** Narrow cell: keep the headline columns, drop the rest. */
+  compact?: boolean;
+}) {
+  const all = columnsFor(results);
+  // bits/dim is the cost axis and recall the headline quality metric; the
+  // error columns are the ones to lose when there is no room.
+  const columns = compact
+    ? all.filter((c) => c.key === "bits_per_dim" || c.key.startsWith("recall"))
+    : all;
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
+      <table className={`w-full border-collapse ${compact ? "text-xs" : "text-sm"}`}>
         <thead>
           <tr className="border-b border-slate-300 text-left">
             <th className="py-2 pr-6 font-medium text-slate-700">method</th>
@@ -86,7 +98,7 @@ export function ResultsTable({ results }: { results: MethodResult[] }) {
         <tbody>
           {results.map((row) => (
             <tr key={row.label} className="border-b border-slate-100 last:border-0">
-              <td className="min-w-48 py-2 pr-6 font-medium text-slate-900">
+              <td className={`py-2 pr-6 font-medium text-slate-900 ${compact ? "" : "min-w-48"}`}>
                 {row.label}
               </td>
               {columns.map((c) => (

@@ -475,7 +475,7 @@ function Playground() {
 
   return (
     <div className="mx-auto max-w-[110rem] px-6 py-8">
-      <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
         <div className="space-y-6">
           <Panel title="Quantizer">
             <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-0.5">
@@ -652,6 +652,17 @@ function Playground() {
           {/* One results block per dataset, each named and each plotted against
               its own reference curves -- a single merged table would hide which
               dataset a number came from. */}
+          {/* One panel per dataset. Several runs grid rather than stack: the
+              comparison across datasets is the point, and a column of
+              full-width panels puts them a scroll apart. A single result keeps
+              the full width, where the chart has room to breathe. */}
+          <div
+            className={
+              resultEntries.length > 1
+                ? "grid items-start gap-6 xl:grid-cols-2 2xl:grid-cols-3"
+                : "space-y-6"
+            }
+          >
           {resultEntries.map(([id, rows]) => {
             const entry = entries.find((e) => e.id === id);
             const title = entry?.title ?? "saved run";
@@ -670,8 +681,9 @@ function Playground() {
                   datasetLabel={title}
                   // Everything but this run, which is drawn as the subject.
                   history={runs.filter((r) => !currentRunIds.includes(r.id))}
-                  metricsTable={<ResultsTable results={rows} />}
+                  metricsTable={<ResultsTable results={rows} compact={resultEntries.length > 1} />}
                   scale={entry?.scale}
+                  compact={resultEntries.length > 1}
                   onRunBenchmarkMethods={
                     entry?.dataset ? () => onRunBenchmarkMethods(id) : undefined
                   }
@@ -681,6 +693,7 @@ function Playground() {
               </Panel>
             );
           })}
+          </div>
 
           <section className="min-w-0 rounded-lg border border-slate-200 bg-white">
             <details open={configOpen} onToggle={(e) => setConfigOpen(e.currentTarget.open)}>

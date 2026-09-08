@@ -45,6 +45,8 @@ type Props = {
   runningBenchmarkMethods?: boolean;
   /** Whether those results are already in `results`. */
   benchmarkMethodsRun?: boolean;
+  /** Shown in a grid cell rather than full width: shorter chart, tighter type. */
+  compact?: boolean;
 };
 
 /** The family a method label names: `MinMax (b=4)` -> `MinMax`. */
@@ -101,6 +103,7 @@ export function SotaOverlay({
   onRunBenchmarkMethods,
   runningBenchmarkMethods = false,
   benchmarkMethodsRun = false,
+  compact = false,
 }: Props) {
   const [sota, setSota] = useState<Sota | null>(null);
   const [prefs, setPrefs] = useState<OverlayPrefs | null>(null);
@@ -240,7 +243,7 @@ export function SotaOverlay({
         />
       ) : (
       <>
-      {show && dataset === null && (
+      {show && dataset === null && !compact && (
         <p className="mb-2 text-xs text-slate-500">
           These vectors have no published counterpart, so there is nothing to compare
           against by default. Pick a dataset above to plot its curves behind yours — the
@@ -251,7 +254,7 @@ export function SotaOverlay({
       <TradeoffChart
         series={[...reference, ...earlier, { name: "this run", points: mine, emphasis: true }]}
         caption={`recall@${k} against bits per dimension — up and to the left is better`}
-        height={340}
+        height={compact ? 230 : 340}
       />
 
           {metricsTable && (
@@ -264,7 +267,7 @@ export function SotaOverlay({
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
           Reference curves are the published results on {shortName(dataset ?? "", entry.dim)} (
           {entry.n_base.toLocaleString()} vectors at {entry.dim}d).{" "}
-          {benchmarkDataset === dataset ? (
+          {compact ? null : benchmarkDataset === dataset ? (
             <>
               Your run sampled the same dataset, so the curves are directly comparable —
               though on a subsample, which usually reads a little higher than the full
