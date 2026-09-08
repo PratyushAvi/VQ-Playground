@@ -26,6 +26,9 @@ export type Entry = {
   dataset?: Dataset;
   /** What the file turned out to contain, for the UI to report. */
   summary?: string;
+  /** Rows actually read, against the dataset's full size -- the difference
+   *  between a subsampled score and a full-base one. */
+  scale?: { sampled: number; total: number };
 };
 
 /** How far a dataset has got in the current run. */

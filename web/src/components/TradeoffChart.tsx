@@ -180,7 +180,7 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
                 .map((p, j) => `${j === 0 ? "M" : "L"}${x(p.bits)},${y(p.recall)}`)
                 .join(" ");
               return (
-                <g key={s.name} opacity={dimmed ? 0.18 : 1}>
+                <g key={`${i}:${s.name}`} opacity={dimmed ? 0.18 : 1}>
                   <path
                     d={path}
                     fill="none"
@@ -190,9 +190,9 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
                     strokeLinejoin="round"
                     strokeLinecap="round"
                   />
-                  {s.points.map((p) => (
+                  {s.points.map((p, j) => (
                     <g
-                      key={`${s.name}-${p.bits}`}
+                      key={`${s.name}-${j}`}
                       onMouseEnter={() =>
                         setHover({
                           x: x(p.bits),
@@ -249,7 +249,7 @@ export function TradeoffChart({ series, caption, height = 260 }: Props) {
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
         {series.map((s, i) => (
           <li
-            key={s.name}
+            key={`${i}:${s.name}`}
             onMouseEnter={() => setFocused(s.name)}
             onMouseLeave={() => setFocused(null)}
             className="flex cursor-default items-center gap-1.5 text-xs text-slate-600"

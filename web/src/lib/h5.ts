@@ -60,23 +60,40 @@ function seededRandom(seed: number): () => number {
 }
 
 /**
- * `count` distinct indices from `0..total`, ascending. Ascending because HDF5
- * reads them in file order, and a sorted walk is far cheaper than a random one.
- * The first `count` rows of a real dataset are often ordered (by class, by
- * ingestion date), so a uniform sample is the representative choice.
+ * `count` row indices from `0..total`, ascending.
+ *
+ * Currently one contiguous chunk from a seeded random offset. That is a single
+ * hyperslab, so a remote import costs one range request rather than the ~120 a
+ * scattered sample needs, and finishes in about a second instead of a minute.
+ * The cost is representativeness: a dataset ordered by class or ingestion date
+ * hands back a biased slice. A deliberate trade for a responsive interface, not
+ * a statistically sound sample -- restoring a spread sample means drawing
+ * several runs instead of one, and `readRows` already coalesces whatever it is
+ * handed.
  */
 function sampleIndices(total: number, count: number, random: () => number): number[] {
   if (count >= total) return Array.from({ length: total }, (_, i) => i);
-  const picked = new Set<number>();
-  while (picked.size < count) picked.add(Math.floor(random() * total));
-  return [...picked].sort((a, b) => a - b);
+  // Seeded offset, so the same dataset and settings still give the same rows.
+  const start = Math.floor(random() * (total - count));
+  return Array.from({ length: count }, (_, i) => start + i);
 }
 
-/** Read the given rows of a 2-D dataset into one contiguous Float32Array. */
-function readRows(dataset: any, rows: number[], dim: number): Float32Array {
+/**
+ * Read the given rows of a 2-D dataset into one contiguous Float32Array.
+ *
+ * `onRow` is called as blocks land. That matters more than it looks: against a
+ * remote file each block is an HTTP range request, so a large sample can take
+ * minutes, and a bar that only moved at the end would read as a hang.
+ */
+function readRows(
+  dataset: any,
+  rows: number[],
+  dim: number,
+  onRow?: (done: number) => void,
+): Float32Array {
   const out = new Float32Array(rows.length * dim);
   // Contiguous runs read in one hyperslab; scattered rows cost a call each,
-  // which measures ~5x slower but is still well under a second for 10k rows.
+  // which measures ~5x slower but is still well under a second locally.
   let i = 0;
   while (i < rows.length) {
     let run = 1;
@@ -84,6 +101,7 @@ function readRows(dataset: any, rows: number[], dim: number): Float32Array {
     const block = dataset.slice([[rows[i], rows[i] + run], [0, dim]]) as Float32Array;
     out.set(block, i * dim);
     i += run;
+    onRow?.(i);
   }
   return out;
 }
@@ -212,10 +230,14 @@ async function readMounted(
     const baseRows = sampleIndices(fileBase, options.nBase, random);
     const evalRows = sampleIndices(fileEval, options.nEval, random);
 
-    options.onProgress?.("sampling base", 0, baseRows.length);
-    const base = readRows(baseSet, baseRows, dim);
-    options.onProgress?.("sampling base", baseRows.length, baseRows.length);
-    const evalQueries = readRows(evalSet, evalRows, dim);
+    const stage = "downloading dataset sample";
+    options.onProgress?.(stage, 0, baseRows.length + evalRows.length);
+    const base = readRows(baseSet, baseRows, dim, (done) =>
+      options.onProgress?.(stage, done, baseRows.length + evalRows.length),
+    );
+    const evalQueries = readRows(evalSet, evalRows, dim, (done) =>
+      options.onProgress?.(stage, baseRows.length + done, baseRows.length + evalRows.length),
+    );
 
     // Shipped neighbors index the *full* base, so they cannot be reused once we
     // subsample -- the indices would point at rows we did not keep. Recompute

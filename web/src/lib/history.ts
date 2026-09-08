@@ -13,7 +13,8 @@ import type { MethodResult } from "./types";
 const DB_NAME = "vq-playground";
 const STORE = "runs";
 const PREFS = "prefs";
-const DB_VERSION = 2;
+const SAVED = "quantizers";
+const DB_VERSION = 3;
 
 /** One completed run, as stored. */
 export type RunRecord = {
@@ -46,6 +47,10 @@ function open(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(PREFS)) {
         db.createObjectStore(PREFS);
       }
+      // v3: pipelines the reader composed and named.
+      if (!db.objectStoreNames.contains(SAVED)) {
+        db.createObjectStore(SAVED, { keyPath: "name" });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -71,7 +76,40 @@ async function transact<T>(
   });
 }
 
+/**
+ * What makes two runs the same experiment: the same methods at the same bit
+ * rates, under the same seed, on the same dataset. Re-running that combination
+ * should replace the old entry rather than pile up identical rows -- sweeping a
+ * parameter back and forth is normal, and every repeat would otherwise leave a
+ * duplicate in the history and a duplicate curve on the plot.
+ */
+function identityOf(record: RunRecord): string {
+  const methods = record.results
+    .map((r) => `${r.label}@${r.bits_per_dim.toFixed(4)}`)
+    .sort()
+    .join(";");
+  return `${record.dataset}|${seedOf(record.config)}|${methods}`;
+}
+
+/** The seed a config ran under; runs at different seeds are different runs. */
+function seedOf(config: string): string {
+  try {
+    return String((JSON.parse(config) as { seed?: unknown }).seed ?? "");
+  } catch {
+    return "";
+  }
+}
+
 export async function saveRun(record: RunRecord): Promise<void> {
+  // Drop any earlier run of the same experiment, keeping this one -- the newest
+  // numbers are the ones worth having if anything about the build changed.
+  const identity = identityOf(record);
+  const existing = await listRuns();
+  for (const previous of existing) {
+    if (previous.id !== record.id && identityOf(previous) === identity) {
+      await deleteRun(previous.id);
+    }
+  }
   await transact("readwrite", (store) => store.put(record));
 }
 
@@ -89,12 +127,44 @@ export async function clearRuns(): Promise<void> {
   await transact("readwrite", (store) => store.clear());
 }
 
+/** A pipeline the reader composed, named and kept. */
+export type SavedQuantizer = {
+  /** The reader's own name for it; also the key, so saving again replaces it. */
+  name: string;
+  /** The stage list, exactly as the config carries it. */
+  stages: { name: string; [param: string]: unknown }[];
+  savedAt: number;
+};
+
+export async function listSavedQuantizers(): Promise<SavedQuantizer[]> {
+  try {
+    const all = await transact<SavedQuantizer[]>(
+      "readonly",
+      (store) => store.getAll(),
+      SAVED,
+    );
+    return all.sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveQuantizer(quantizer: SavedQuantizer): Promise<void> {
+  await transact("readwrite", (store) => store.put(quantizer), SAVED);
+}
+
+export async function deleteQuantizer(name: string): Promise<void> {
+  await transact("readwrite", (store) => store.delete(name), SAVED);
+}
+
 /** How the results/benchmark overlay is configured, remembered across visits. */
 export type OverlayPrefs = {
   /** Whether the published curves are drawn behind your own. */
   show: boolean;
   /** Whether earlier runs on the same dataset are drawn too. */
   history: boolean;
+  /** Chart, or the ranked table. */
+  view: "chart" | "table";
   /**
    * Which benchmark dataset to compare against, or `null` to follow whatever
    * dataset the run used -- the usual case, and the honest one.
@@ -102,7 +172,12 @@ export type OverlayPrefs = {
   dataset: string | null;
 };
 
-export const DEFAULT_OVERLAY: OverlayPrefs = { show: true, history: true, dataset: null };
+export const DEFAULT_OVERLAY: OverlayPrefs = {
+  show: true,
+  history: true,
+  view: "chart",
+  dataset: null,
+};
 
 export async function loadOverlayPrefs(): Promise<OverlayPrefs> {
   try {

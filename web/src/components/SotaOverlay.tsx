@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 
+import { Leaderboard } from "./Leaderboard";
 import { TradeoffChart, type Series } from "./TradeoffChart";
 import { loadSota, shortName, type Sota } from "../lib/sota";
 import {
@@ -32,6 +33,18 @@ type Props = {
   history?: RunRecord[];
   /** Names this dataset in the history, so past runs on it can be found. */
   datasetLabel?: string;
+  /** This run's own metrics, shown under the chart but not under the ranking,
+   *  which already carries them alongside the published results. */
+  metricsTable?: React.ReactNode;
+  /** How many vectors this run scored, against the dataset's full size, so the
+   *  ranking can say which rows are subsamples. */
+  scale?: { sampled: number; total: number };
+  /** Run the registered vq-bench quantizers on the reader's own vectors. */
+  onRunBenchmarkMethods?: () => void;
+  /** True while that is in flight. */
+  runningBenchmarkMethods?: boolean;
+  /** Whether those results are already in `results`. */
+  benchmarkMethodsRun?: boolean;
 };
 
 /** The family a method label names: `MinMax (b=4)` -> `MinMax`. */
@@ -83,6 +96,11 @@ export function SotaOverlay({
   benchmarkDataset,
   history = [],
   datasetLabel,
+  metricsTable,
+  scale,
+  onRunBenchmarkMethods,
+  runningBenchmarkMethods = false,
+  benchmarkMethodsRun = false,
 }: Props) {
   const [sota, setSota] = useState<Sota | null>(null);
   const [prefs, setPrefs] = useState<OverlayPrefs | null>(null);
@@ -101,10 +119,15 @@ export function SotaOverlay({
 
   const show = prefs?.show ?? true;
   const showHistory = prefs?.history ?? true;
+  const view = prefs?.view ?? "chart";
   // A pinned dataset wins; otherwise follow the run's own, falling back to a
   // default only when the run came from vectors with no benchmark counterpart.
   const following = prefs?.dataset === null || prefs?.dataset === undefined;
-  const dataset = prefs?.dataset ?? benchmarkDataset ?? null;
+  // The chart can honestly show your curve alone; a *ranking* of one row says
+  // nothing, so the table falls back to a default dataset to rank against and
+  // labels it as a different-vectors comparison.
+  const fallback = view === "table" ? "arxiv-nomic-768-normalized" : null;
+  const dataset = prefs?.dataset ?? benchmarkDataset ?? fallback;
 
   const mine = points(results, k);
 
@@ -127,13 +150,12 @@ export function SotaOverlay({
   }
 
   const entry = dataset === null ? undefined : sota?.datasets[dataset];
-  const reference: Series[] =
-    show && entry
-      ? Object.entries(entry.curves).map(([name, curve]) => ({
-          name,
-          points: curve.map((p) => ({ bits: p.bits, recall: p.recall, label: p.label })),
-        }))
-      : [];
+  // Deliberately empty: the published curves were measured on the full base and
+  // this run is a subsample, so drawing them together would compare unlike
+  // things. Running those methods here instead (the button below) puts real,
+  // comparable points on the chart; the published figures stay in the table as
+  // a byline.
+  const reference: Series[] = [];
 
   // Earlier runs are collapsed into one muted series per quantizer family
   // rather than one per run: sweeping `b` across several runs is the usual way
@@ -143,17 +165,37 @@ export function SotaOverlay({
 
   return (
     <div>
+      {onRunBenchmarkMethods && !benchmarkMethodsRun && (
+        <button
+          onClick={onRunBenchmarkMethods}
+          disabled={runningBenchmarkMethods}
+          className="mb-3 w-full rounded-md border border-slate-300 px-3 py-2 text-xs
+                     font-medium text-slate-700 hover:border-slate-500 hover:text-slate-900
+                     disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {runningBenchmarkMethods
+            ? "Running registered vq-bench quantizers…"
+            : "Run registered vq-bench quantizers on this sub-sample"}
+        </button>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs text-slate-600">
-          <input
-            type="checkbox"
-            checked={show}
-            onChange={(e) => update({ show: e.target.checked })}
-            className="rounded border-slate-300"
-          />
-          overlay published results
-        </label>
-        {show && sota && (
+        <div className="flex gap-1 rounded-md bg-slate-100 p-0.5">
+          {(["chart", "table"] as const).map((option) => (
+            <button
+              key={option}
+              onClick={() => update({ view: option })}
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                view === option
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+        {sota && view === "table" && (
           <select
             value={following || dataset === null ? "" : dataset}
             onChange={(e) => update({ dataset: e.target.value === "" ? null : e.target.value })}
@@ -188,6 +230,16 @@ export function SotaOverlay({
         )}
       </div>
 
+      {view === "table" ? (
+        <Leaderboard
+          results={results}
+          reference={show && entry ? Object.values(entry.curves).flat() : []}
+          k={k}
+          scale={scale}
+          referenceScale={entry?.n_base}
+        />
+      ) : (
+      <>
       {show && dataset === null && (
         <p className="mb-2 text-xs text-slate-500">
           These vectors have no published counterpart, so there is nothing to compare
@@ -202,7 +254,13 @@ export function SotaOverlay({
         height={340}
       />
 
-      {show && entry && (
+          {metricsTable && (
+            <div className="mt-5 border-t border-slate-100 pt-4">{metricsTable}</div>
+          )}
+      </>
+      )}
+
+      {show && entry && view === "chart" && (
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
           Reference curves are the published results on {shortName(dataset ?? "", entry.dim)} (
           {entry.n_base.toLocaleString()} vectors at {entry.dim}d).{" "}

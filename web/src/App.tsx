@@ -26,7 +26,17 @@ import {
   type Progress,
 } from "./lib/datasets-panel";
 import type { LoadOptions, LoadedFile } from "./lib/h5";
-import { clearRuns, deleteRun, listRuns, saveRun, type RunRecord } from "./lib/history";
+import {
+  clearRuns,
+  deleteQuantizer,
+  deleteRun,
+  listRuns,
+  listSavedQuantizers,
+  saveQuantizer,
+  saveRun,
+  type RunRecord,
+  type SavedQuantizer,
+} from "./lib/history";
 import { defaultValue, toConfigValue } from "./lib/params";
 import { runner } from "./lib/runner";
 import type { MethodResult, PrimitiveSpec, Quantizer, Stage } from "./lib/types";
@@ -74,8 +84,13 @@ function Playground() {
   const [primitives, setPrimitives] = useState<PrimitiveSpec[]>([]);
   const [mode, setMode] = useState<"family" | "custom">("family");
   const [stages, setStages] = useState<Stage[]>([]);
-  const [selectedFamily, setSelectedFamily] = useState("minmax");
-  const [params, setParams] = useState<Record<string, string>>({});
+  // Several methods can run together, so the selection is a set. Params are
+  // held per family, since each keeps its own even while another is expanded.
+  const [selectedFamilies, setSelectedFamilies] = useState<string[]>(["minmax"]);
+  const [selectedSaved, setSelectedSaved] = useState<string[]>([]);
+  const [params, setParams] = useState<Record<string, Record<string, string>>>({});
+  const [expandedFamily, setExpandedFamily] = useState<string | null>("minmax");
+  const [saved, setSaved] = useState<SavedQuantizer[]>([]);
   const [configText, setConfigText] = useState("");
   // Collapsed by default: the plot is the point, and the JSON is a detail most
   // sessions never need to open.
@@ -97,6 +112,9 @@ function Playground() {
   // is drawing as the subject. Ids carry a random offset to stay unique across
   // a multi-dataset run, so they do not compare reliably against a timestamp.
   const [currentRunIds, setCurrentRunIds] = useState<number[]>([]);
+  // Which datasets have the registered quantizers running, or already run.
+  const [runningBenchmark, setRunningBenchmark] = useState<string[]>([]);
+  const [benchmarkRun, setBenchmarkRun] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,20 +124,28 @@ function Playground() {
       loadSampleDataset(),
       listRuns(),
     ])
-      .then(([families, stageKinds, data, saved]) => {
+      .then(([families, stageKinds, data, savedRuns]) => {
         if (cancelled) return;
         setQuantizers(families);
         setPrimitives(stageKinds);
-        setRuns(saved);
+        setRuns(savedRuns);
         // The sample is bundled, so it is ready the moment the page is. The
         // registry loads separately and may land first, so merge rather than
         // replace -- whichever arrives second must not drop the other.
-        const entry = { ...sampleEntry(data.nBase, data.nEval, data.dim), dataset: data };
+        const entry = {
+          ...sampleEntry(data.nBase, data.nEval, data.dim),
+          dataset: data,
+          scale: { sampled: data.nBase, total: data.nBase },
+        };
         setEntries((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
       })
       .catch((err: unknown) => {
         if (!cancelled) setErrors([`startup failed: ${String(err)}`]);
       });
+
+    listSavedQuantizers().then((all) => {
+      if (!cancelled) setSaved(all);
+    });
 
     // The importable list is a nicety; a failure must not block startup.
     loadRegistry()
@@ -136,51 +162,68 @@ function Playground() {
     };
   }, []);
 
+  // Every family gets its defaults up front, so switching which one is
+  // expanded never loses what was typed into another.
   useEffect(() => {
-    const family = quantizers.find((q) => q.key === selectedFamily);
-    if (!family) return;
-    setParams(Object.fromEntries(family.params.map((p) => [p, defaultValue(p)])));
-    setResults({});
-    setErrors([]);
-    setElapsed(null);
-  }, [selectedFamily, quantizers]);
-
-  useEffect(() => {
-    setResults({});
-    setErrors([]);
-    setElapsed(null);
-  }, [mode]);
-
-  /** The config the form describes -- a built-in family, or a composed chain. */
-  const formConfig = useMemo(() => {
-    const method: Record<string, unknown> =
-      mode === "custom"
-        ? {
-            name: "custom",
-            stages: stages.map((stage) => {
-              const out: Record<string, unknown> = { name: stage.key };
-              for (const [param, raw] of Object.entries(stage.params)) {
-                const value = toConfigValue(param, raw);
-                if (value !== undefined) out[param] = value;
-              }
-              return out;
-            }),
-          }
-        : { name: selectedFamily };
-    if (mode === "family") {
-      for (const [param, raw] of Object.entries(params)) {
-        const value = toConfigValue(param, raw);
-        if (value !== undefined) method[param] = value;
+    if (quantizers.length === 0) return;
+    setParams((prev) => {
+      const next = { ...prev };
+      for (const family of quantizers) {
+        next[family.key] ??= Object.fromEntries(
+          family.params.map((p) => [p, defaultValue(p)]),
+        );
       }
-    }
+      return next;
+    });
+  }, [quantizers]);
+
+  /** The stage list a composed pipeline describes, in config shape. */
+  const composedStages = useMemo(
+    () =>
+      stages.map((stage) => {
+        const out: { name: string; [param: string]: unknown } = { name: stage.key };
+        for (const [param, raw] of Object.entries(stage.params)) {
+          const value = toConfigValue(param, raw);
+          if (value !== undefined) out[param] = value;
+        }
+        return out;
+      }),
+    [stages],
+  );
+
+  /**
+   * The config the form describes: one method per selected quantizer. In
+   * Compose mode the chain under construction is the method, so the built-in
+   * selection steps aside -- otherwise pressing Run would silently include
+   * whatever was ticked on the other tab.
+   */
+  const formConfig = useMemo(() => {
+    const methods: Record<string, unknown>[] =
+      mode === "custom"
+        ? [{ name: "custom", stages: composedStages }]
+        : [
+            ...selectedSaved
+              .map((name) => saved.find((q) => q.name === name))
+              .filter((q): q is SavedQuantizer => q !== undefined)
+              .map((q) => ({ name: q.name, stages: q.stages })),
+            ...selectedFamilies.map((key) => {
+              const method: Record<string, unknown> = { name: key };
+              for (const [param, raw] of Object.entries(params[key] ?? {})) {
+                const value = toConfigValue(param, raw);
+                if (value !== undefined) method[param] = value;
+              }
+              return method;
+            }),
+          ];
+
     return {
-      methods: [method],
+      methods,
       metrics: DEFAULT_METRICS,
       k: DEFAULT_KS,
       seed: SEED,
       n_reconstruct: 200,
     };
-  }, [mode, selectedFamily, params, stages]);
+  }, [mode, selectedFamilies, selectedSaved, saved, params, composedStages]);
 
   useEffect(() => {
     setConfigText(JSON.stringify(formConfig, null, 2));
@@ -239,7 +282,12 @@ function Playground() {
         `${loaded.summary.sampledBase.toLocaleString()} of ` +
         `${loaded.summary.fileBase.toLocaleString()} vectors · ${loaded.summary.dim}d · ` +
         `ground truth ${loaded.summary.groundTruth}`;
-      const next: Entry = { ...entry, dataset: loaded.dataset, summary };
+      const next: Entry = {
+        ...entry,
+        dataset: loaded.dataset,
+        summary,
+        scale: { sampled: loaded.summary.sampledBase, total: loaded.summary.fileBase },
+      };
       setEntries((prev) => prev.map((e) => (e.id === entry.id ? next : e)));
       return next;
     },
@@ -269,12 +317,83 @@ function Playground() {
     [ensureLoaded, entries],
   );
 
+  /** Keep the composed chain under a name, so it can be run again later. */
+  const onSavePipeline = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim();
+      if (trimmed === "" || composedStages.length === 0) return;
+      await saveQuantizer({ name: trimmed, stages: composedStages, savedAt: Date.now() });
+      setSaved(await listSavedQuantizers());
+      // Selecting it and returning to the list is the obvious next step.
+      setSelectedSaved((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+      setMode("family");
+    },
+    [composedStages],
+  );
+
+  const onDeleteSaved = useCallback(async (name: string) => {
+    await deleteQuantizer(name);
+    setSaved(await listSavedQuantizers());
+    setSelectedSaved((prev) => prev.filter((n) => n !== name));
+  }, []);
+
   const onAddFile = useCallback((file: File) => {
     const entry = customEntry(file);
     // The file joins the list like any other row -- unticked, with an `import`
     // button -- so opening a 2 GB file by mistake costs nothing until asked.
     setEntries((prev) => (prev.some((e) => e.id === entry.id) ? prev : [...prev, entry]));
   }, []);
+
+  /**
+   * Run every registered vq-bench quantizer on one dataset's vectors.
+   *
+   * The published figures were measured over each dataset's full base; these
+   * are the same methods over the rows actually loaded here, which is what
+   * makes the comparison apples-to-apples.
+   */
+  const onRunBenchmarkMethods = useCallback(
+    async (entryId: string) => {
+      const entry = entries.find((e) => e.id === entryId);
+      const vectors = entry?.dataset;
+      if (!entry || !vectors) return;
+
+      setRunningBenchmark((prev) => [...prev, entryId]);
+      try {
+        const config = JSON.stringify({
+          methods: quantizers.map((q) => ({
+            name: q.key,
+            // Defaults, so this reproduces the registry rather than whatever
+            // the reader happens to have typed on the left.
+            ...Object.fromEntries(
+              q.params
+                .map((param) => [param, toConfigValue(param, defaultValue(param))])
+                .filter(([, value]) => value !== undefined),
+            ),
+          })),
+          metrics: DEFAULT_METRICS,
+          k: DEFAULT_KS,
+          seed: SEED,
+          n_reconstruct: 200,
+        });
+        const out = await runner().run(config, vectors);
+        if (!out.ok) {
+          setErrors(out.errors.map((e) => `${entry.title}: ${e}`));
+          return;
+        }
+        // Merge, so the reader's own run stays alongside the reference set.
+        setResults((prev) => ({
+          ...prev,
+          [entryId]: dedupeByLabel([...(prev[entryId] ?? []), ...out.results]),
+        }));
+        setBenchmarkRun((prev) => [...prev, entryId]);
+      } catch (err: unknown) {
+        setErrors([`${entry.title}: ${(err as Error).message ?? String(err)}`]);
+      } finally {
+        setRunningBenchmark((prev) => prev.filter((id) => id !== entryId));
+      }
+    },
+    [entries, quantizers],
+  );
 
   const onRun = useCallback(async () => {
     if (chosen.length === 0) {
@@ -285,6 +404,7 @@ function Playground() {
     setErrors([]);
     setResults({});
     setProgress({});
+    setBenchmarkRun([]);
     const started = performance.now();
     const collected: Record<string, MethodResult[]> = {};
     const problems: string[] = [];
@@ -349,6 +469,8 @@ function Playground() {
   }, [chosen, configText, entries, report]);
 
   const ready = quantizers.length > 0 && entries.length > 0;
+  const methodCount =
+    mode === "custom" ? 1 : selectedFamilies.length + selectedSaved.length;
   const resultEntries = Object.entries(results);
 
   return (
@@ -375,17 +497,67 @@ function Playground() {
             {!ready ? (
               <p className="text-sm text-slate-500">Loading…</p>
             ) : mode === "family" ? (
-              <MethodPicker
-                quantizers={quantizers}
-                selected={selectedFamily}
-                params={params}
-                onSelect={setSelectedFamily}
-                onParamChange={(param, value) =>
-                  setParams((prev) => ({ ...prev, [param]: value }))
-                }
-              />
+              <>
+                <div className="mb-2 flex items-center justify-between text-xs">
+                  <span className="text-slate-500">
+                    {methodCount} method{methodCount === 1 ? "" : "s"} selected
+                  </span>
+                  <span className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setSelectedFamilies(quantizers.map((q) => q.key));
+                        setSelectedSaved(saved.map((q) => q.name));
+                      }}
+                      className="text-slate-500 underline hover:text-slate-900"
+                    >
+                      all
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedFamilies([]);
+                        setSelectedSaved([]);
+                      }}
+                      className="text-slate-500 underline hover:text-slate-900"
+                    >
+                      none
+                    </button>
+                  </span>
+                </div>
+                <MethodPicker
+                  quantizers={quantizers}
+                  saved={saved}
+                  selected={selectedFamilies}
+                  selectedSaved={selectedSaved}
+                  params={params}
+                  expanded={expandedFamily}
+                  onToggle={(key) =>
+                    setSelectedFamilies((prev) =>
+                      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+                    )
+                  }
+                  onToggleSaved={(name) =>
+                    setSelectedSaved((prev) =>
+                      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+                    )
+                  }
+                  onExpand={setExpandedFamily}
+                  onParamChange={(key, param, value) =>
+                    setParams((prev) => ({
+                      ...prev,
+                      [key]: { ...(prev[key] ?? {}), [param]: value },
+                    }))
+                  }
+                  onDeleteSaved={onDeleteSaved}
+                />
+              </>
             ) : (
-              <PipelineBuilder primitives={primitives} stages={stages} onChange={setStages} />
+              <>
+                <PipelineBuilder primitives={primitives} stages={stages} onChange={setStages} />
+                <SavePipeline
+                  disabled={composedStages.length === 0}
+                  onSave={onSavePipeline}
+                />
+              </>
             )}
           </Panel>
 
@@ -458,7 +630,8 @@ function Playground() {
           >
             {busy
               ? "Running…"
-              : `Run on ${selected.length} dataset${selected.length === 1 ? "" : "s"}`}
+              : `Run ${methodCount} method${methodCount === 1 ? "" : "s"} on ` +
+                `${selected.length} dataset${selected.length === 1 ? "" : "s"}`}
           </button>
 
           {errors.length > 0 && (
@@ -488,6 +661,8 @@ function Playground() {
                 title={title}
                 aside={elapsed !== null ? `${elapsed.toFixed(2)}s total` : undefined}
               >
+                {/* The ranked table already carries this run's metrics beside
+                    the published ones, so the plain table would repeat it. */}
                 <SotaOverlay
                   results={rows}
                   k={DEFAULT_KS[DEFAULT_KS.length - 1]}
@@ -495,10 +670,14 @@ function Playground() {
                   datasetLabel={title}
                   // Everything but this run, which is drawn as the subject.
                   history={runs.filter((r) => !currentRunIds.includes(r.id))}
+                  metricsTable={<ResultsTable results={rows} />}
+                  scale={entry?.scale}
+                  onRunBenchmarkMethods={
+                    entry?.dataset ? () => onRunBenchmarkMethods(id) : undefined
+                  }
+                  runningBenchmarkMethods={runningBenchmark.includes(id)}
+                  benchmarkMethodsRun={benchmarkRun.includes(id)}
                 />
-                <div className="mt-5 border-t border-slate-100 pt-4">
-                  <ResultsTable results={rows} />
-                </div>
               </Panel>
             );
           })}
@@ -520,6 +699,52 @@ function Playground() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Keep the first row for each label; a reference run may repeat the reader's. */
+function dedupeByLabel(rows: MethodResult[]): MethodResult[] {
+  const seen = new Map<string, MethodResult>();
+  for (const row of rows) if (!seen.has(row.label)) seen.set(row.label, row);
+  return [...seen.values()];
+}
+
+/** Naming a composed pipeline so it can be run again later. */
+function SavePipeline({
+  disabled,
+  onSave,
+}: {
+  disabled: boolean;
+  onSave: (name: string) => void;
+}) {
+  const [name, setName] = useState("");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(name);
+        setName("");
+      }}
+      className="mt-4 flex gap-2 border-t border-slate-100 pt-3"
+    >
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="name this pipeline"
+        aria-label="pipeline name"
+        className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs
+                   focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={disabled || name.trim() === ""}
+        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700
+                   hover:border-slate-500 hover:text-slate-900
+                   disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        save
+      </button>
+    </form>
   );
 }
 

@@ -62,8 +62,12 @@ Drop in your own `.h5` to run against it. Two layouts are accepted:
 | harness (what `vqb data get` writes) | `base` | `eval` | `eval_candidates` |
 | VIBE (what you download) | `train` | `test` | `neighbors` |
 
-Rows are sampled uniformly at random (seeded, so the same file and settings give the same
-subset) rather than taken from the front, since real datasets are often ordered. When a
+Rows are currently read as one contiguous chunk from a seeded random offset. That is a
+single hyperslab, so an import is one range request rather than ~120, and finishes in
+about a second instead of a minute — a deliberate trade of representativeness for a
+responsive interface while the UI is being built. A dataset ordered by class or ingestion
+date will hand back a biased slice; restoring a spread sample means drawing several runs
+instead of one (`sampleIndices` in `web/src/lib/h5.ts`). When a
 file ships no ground truth -- or when subsampling makes its indices meaningless -- the
 exact top-L is brute-forced by vq-bench through the WASM boundary, never in JS.
 
@@ -94,12 +98,28 @@ Those curves come from `tools/extract_sota.py`, which distills the fork's own
 It is bundled as a static asset, so the comparison works offline like everything else.
 Re-run it after syncing the fork to pick up a newer benchmark run.
 
-When a run used an imported benchmark dataset, the overlay defaults to *that* dataset's
-published curves and says the comparison is direct. Otherwise it compares your vectors
-against results measured on someone else's, and says so — shape against shape, not a
-like-for-like score. Earlier runs on the same dataset are drawn behind the current one,
-merged into one curve per quantizer family, so a sweep explored one run at a time still
-reads as a curve. Both layers are remembered across visits.
+Every results panel has a **chart** and a **table** view. The chart carries only numbers
+measured on the same vectors: this run, and earlier runs on the same dataset (merged into
+one curve per family, so a sweep explored one run at a time still reads as a curve).
+
+The published figures are *not* drawn on the chart, because they were measured over each
+dataset's full base and your run is a subsample — a smaller base is an easier search, so
+plotting them together would flatter your numbers. Instead:
+
+- the table cites each method's published figure as a byline, and marks every row with the
+  vectors it actually scored (`2k sample` against `257k full`);
+- one button runs **all fifteen registered vq-bench quantizers on your own sub-sample**,
+  which is the apples-to-apples comparison — same vectors, same ground truth, one ranking.
+
+Ranks are global and every column sorts, so you can compare at a fixed bit rate rather
+than letting the bit budget decide the order. Both views remember their settings.
+
+### Running many quantizers at once
+
+Methods are a checkbox list — several built-in families, plus any pipeline you have saved,
+run together in one pass so a frontier can be filled in *en masse* rather than one method
+at a time. `all` / `none` make bulk selection cheap. A composed pipeline can be named and
+saved; it then appears in its own **Saved** section alongside the built-ins.
 
 ### Composing your own quantizer
 

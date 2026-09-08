@@ -26,6 +26,15 @@ const EXPECTED = [
   { key: "pq", label: "PQ", recall10: 0.378 },
 ];
 
+/**
+ * Tick exactly one built-in family. The picker is a checkbox list now, so
+ * "select this method" means clearing the rest first.
+ */
+async function selectOnly(page, family) {
+  await page.getByRole("button", { name: "none", exact: true }).click();
+  await page.getByRole("checkbox", { name: `run ${family}` }).check();
+}
+
 let failed = 0;
 function check(what, ok, detail) {
   if (!ok) failed += 1;
@@ -55,28 +64,30 @@ check(
 );
 
 await page.getByRole("button", { name: "Open the playground" }).click();
-await page.waitForSelector("select", { timeout: 30000 });
+await page.waitForSelector('input[type="checkbox"]', { timeout: 30000 });
 check("the playground opens", (await page.evaluate(() => location.hash)) === "#playground", "wrong hash");
 
-await page.waitForFunction(() => document.querySelectorAll('input[type="checkbox"]').length > 5,
-  null, { timeout: 20000 });
-const rows = await page.locator('input[type="checkbox"]').count();
-check("the sample and the benchmark datasets are listed together", rows === 11, `${rows} rows`);
-const first = await page.locator("li").first().innerText();
-check("the random point set is first", /random point set/.test(first), first.replace(/\s+/g, " "));
+const datasetBoxes = page.getByRole("checkbox", { name: /^use / });
+await datasetBoxes.first().waitFor({ timeout: 20000 });
+await page.waitForFunction(
+  () => document.querySelectorAll('input[aria-label^="use "]').length === 11,
+  null,
+  { timeout: 20000 },
+);
+check("the sample and the benchmark datasets are listed together",
+  (await datasetBoxes.count()) === 11, `${await datasetBoxes.count()} rows`);
+check("the random point set is first",
+  (await datasetBoxes.first().getAttribute("aria-label")) === "use random point set",
+  String(await datasetBoxes.first().getAttribute("aria-label")));
 
-const families = await page.locator("select").first().locator("option").count();
-check("registry populates the dropdown", families === 15, `${families} families`);
+const families = await page.getByRole("checkbox", { name: /^run / }).count();
+check("the registry populates the method list", families === 15, `${families} families`);
 
 for (const { key, label, recall10 } of EXPECTED) {
-  await page.selectOption("select", key);
+  await selectOnly(page, label);
   await page.waitForTimeout(200);
 
-  // Switching families must clear the previous method's results.
-  const stale = await page.locator("tbody tr").count();
-  check(`${key}: previous results cleared`, stale === 0, `${stale} rows left over`);
-
-  await page.getByRole("button", { name: /^Run on/ }).click();
+  await page.getByRole("button", { name: /^Run \d+ method/ }).click();
   await page.waitForSelector(`tbody tr:has-text("${label}")`, { timeout: 180000 });
 
   const cells = await page.locator("tbody tr").first().locator("td").allInnerTexts();
@@ -86,17 +97,17 @@ for (const { key, label, recall10 } of EXPECTED) {
 }
 
 // A rejected param must surface vq-bench's own message, not a crash.
-await page.selectOption("select", "minmax");
+await selectOnly(page, "MinMax");
 await page.waitForTimeout(200);
 await page.locator('input[inputmode="numeric"]').first().fill("99");
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector("li.font-mono", { timeout: 60000 });
 const message = await page.locator("li.font-mono").first().innerText();
 check("invalid param reports vq-bench's reason", /b must be in 1..=8/.test(message), message);
 
 // A sweep should produce one row per value.
 await page.locator('input[inputmode="numeric"]').first().fill("2, 4, 6");
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForFunction(() => document.querySelectorAll("tbody tr").length === 3,
   null, { timeout: 120000 });
 check("a swept param runs once per value", true, "3 rows");
@@ -111,13 +122,13 @@ check("page does not overflow horizontally", overflow <= 0, `${overflow}px`);
 check("config editor is present", await page.locator(".cm-content").count() === 1, "no editor");
 
 // A run must be remembered, and survive a reload.
-await page.selectOption("select", "minmax");
+await selectOnly(page, "MinMax");
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector('tbody tr:has-text("MinMax")', { timeout: 120000 });
 await page.waitForSelector("text=/run.? on this device/", { timeout: 15000 });
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector("select", { timeout: 30000 });
+await page.getByRole("checkbox", { name: /^run / }).first().waitFor({ timeout: 30000 });
 const remembered = await page.locator("text=/run.? on this device/").count();
 check("runs persist across a reload", remembered === 1, "history empty after reload");
 
@@ -150,14 +161,14 @@ for (const [file, layout, truth] of [
   );
 
   // Only this dataset, so the run's results are unambiguous.
-  await page.locator("li").first().locator('input[type="checkbox"]').uncheck();
-  await page.getByRole("button", { name: /^Run on/ }).click();
+  await page.getByRole("checkbox", { name: "use random point set" }).uncheck();
+  await page.getByRole("button", { name: /^Run \d+ method/ }).click();
   await page.waitForFunction(() => document.querySelectorAll("table").length > 0,
     null, { timeout: 300000 });
   check(`${layout} layout: runs`, true, "");
 
-  await row.locator('input[type="checkbox"]').uncheck();
-  await page.locator("li").first().locator('input[type="checkbox"]').check();
+  await row.getByRole("checkbox").uncheck();
+  await page.getByRole("checkbox", { name: "use random point set" }).check();
 }
 
 await page.getByRole("button", { name: /use your own/ }).click();
@@ -167,19 +178,19 @@ await page.locator("li").filter({ hasText: "wrong.h5" }).first()
 await page.waitForSelector("text=/unrecognized layout/", { timeout: 120000 });
 check("an unrecognized layout is refused with a clear reason", true, "");
 const badBox = page.locator("li").filter({ hasText: "wrong.h5" }).first()
-  .locator('input[type="checkbox"]');
+  .getByRole("checkbox");
 check("a dataset that failed to import stays unselectable", await badBox.isDisabled(), "it was tickable");
 
 // --- Custom pipelines ---
 // The sample dataset only, so the composed chain is compared against the
 // built-in on identical vectors.
-await page.locator("li").first().locator('input[type="checkbox"]').check();
+await page.getByRole("checkbox", { name: "use random point set" }).check();
 await page.waitForTimeout(200);
 
 await page.getByRole("button", { name: "Built-in" }).click();
-await page.selectOption("select", "minmax");
+await selectOnly(page, "MinMax");
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector('tbody tr:has-text("MinMax (b=4)")', { timeout: 120000 });
 const builtinRow = await page.locator("tbody tr").first().innerText();
 
@@ -192,7 +203,7 @@ await page.locator("select").last().selectOption("cast_uint");
 await page.waitForTimeout(200);
 check("stages can be added", await page.locator("ol li").count() === 2, "expected 2 stages");
 
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector('tbody tr:has-text("custom")', { timeout: 120000 });
 const composedRow = await page.locator("tbody tr").first().innerText();
 
@@ -210,7 +221,7 @@ check(
 const bits = page.locator("ol li").last().locator("input");
 await bits.fill("99");
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector("li.font-mono", { timeout: 60000 });
 const stageError = await page.locator("li.font-mono").first().innerText();
 check(
@@ -221,42 +232,58 @@ check(
 
 // --- The benchmark overlay ---
 await page.getByRole("button", { name: "Built-in" }).click();
-await page.selectOption("select", "minmax");
+await selectOnly(page, "MinMax");
 await page.waitForTimeout(200);
 await page.locator('input[inputmode="numeric"]').first().fill("2, 4, 6");
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForFunction(() => document.querySelectorAll("tbody tr").length === 3, null, { timeout: 120000 });
 // The overlay lives inside each dataset's own results panel now.
 await page.waitForSelector("figure", { timeout: 20000 });
 
-// Earlier runs in this suite are legitimately in the legend too, so assert on
-// what must be there rather than an exact count.
+// The chart carries only comparable numbers: this run, and earlier runs on the
+// same vectors. Published figures are cited in the table instead.
 const overlay = await page.locator("figure ul li").allInnerTexts();
 check(
-  "the overlay plots this run alongside earlier ones",
+  "the chart plots this run alongside earlier ones",
   overlay.some((t) => /this run/.test(t)) && overlay.some((t) => /earlier/.test(t)),
   overlay.join(", "),
 );
 
-// Both layers are optional; turning them off leaves only the current run.
-// The labels name them, which is steadier than positional indexes.
-await page.locator("label").filter({ hasText: "overlay published results" }).first()
-  .locator("input").uncheck();
+// The registered quantizers can be run on the same vectors, which is what makes
+// a comparison against the benchmark's methods honest.
+await page.getByRole("button", { name: "table", exact: true }).click();
+await page.waitForTimeout(300);
+const before = await page.locator("table tbody tr").count();
+await page.getByRole("button", { name: /Run registered vq-bench/ }).click();
+await page.waitForFunction((n) => document.querySelectorAll("table tbody tr").length > n,
+  before, { timeout: 600000 });
+const after = await page.locator("table tbody tr").count();
+check("the registered quantizers run on the same sub-sample", after >= 15,
+  `${before} rows before, ${after} after`);
+check("running them retires the button",
+  (await page.getByRole("button", { name: /Run registered vq-bench/ }).count()) === 0,
+  "the button is still offered");
+const scales = await page.locator("table tbody tr td:nth-child(3)").allInnerTexts();
+check("every ranked row states the vectors it scored",
+  scales.every((t) => /full|sample/.test(t)), scales.slice(0, 3).join(", "));
+await page.getByRole("button", { name: "chart", exact: true }).click();
+await page.waitForTimeout(300);
+
+// Earlier runs are optional; turning them off leaves only the current one.
 const earlierToggle = page.locator("label").filter({ hasText: "earlier runs" }).first();
 if (await earlierToggle.count()) await earlierToggle.locator("input").uncheck();
 await page.waitForTimeout(300);
 const alone = await page.locator("figure ul li").allInnerTexts();
-check("both overlay layers can be turned off", alone.length === 1, alone.join(", "));
+check("earlier runs can be turned off", alone.length === 1, alone.join(", "));
 
 // And the choice survives a reload, since it is stored per browser.
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForFunction(() => document.querySelectorAll('input[type="checkbox"]').length > 5,
-  null, { timeout: 30000 });
-await page.getByRole("button", { name: /^Run on/ }).click();
+await page.getByRole("checkbox", { name: /^use / }).first().waitFor({ timeout: 30000 });
+await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector("figure", { timeout: 120000 });
 const afterReload = await page.locator("figure ul li").allInnerTexts();
 check(
-  "the overlay setting persists across a reload",
+  "the chart setting persists across a reload",
   afterReload.length === 1,
   afterReload.join(", "),
 );
