@@ -4,8 +4,12 @@
 
 import { useEffect, useState } from "react";
 
+import { PipelineSlideshow } from "./PipelineSlideshow";
 import { TradeoffChart, type Series } from "./TradeoffChart";
+import { featuredPipelines, type Pipeline } from "../lib/pipelines";
+import { runner } from "../lib/runner";
 import { loadSota, shortName, type Sota } from "../lib/sota";
+import type { Quantizer } from "../lib/types";
 
 type Props = {
   onOpenPlayground: () => void;
@@ -15,9 +19,16 @@ export function Landing({ onOpenPlayground }: Props) {
   const [sota, setSota] = useState<Sota | null>(null);
   const [dataset, setDataset] = useState("arxiv-nomic-768-normalized");
   const [failed, setFailed] = useState(false);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
 
   useEffect(() => {
     loadSota().then(setSota).catch(() => setFailed(true));
+    // The diagrams are read out of the registry, so they cannot drift from
+    // what the crate reports. A failure just leaves the slot empty.
+    runner()
+      .listQuantizers()
+      .then((families: Quantizer[]) => setPipelines(featuredPipelines(families)))
+      .catch(() => undefined);
   }, []);
 
   const entry = sota?.datasets[dataset];
@@ -33,7 +44,7 @@ export function Landing({ onOpenPlayground }: Props) {
     <div className="mx-auto grid max-w-6xl gap-10 px-6 py-12 lg:grid-cols-2">
       <section>
         <h1 className="text-4xl tracking-tight text-slate-900">
-          Vector quantizers, running in your browser
+          Vector Quantizer Playground
         </h1>
         <p className="mt-4 text-base leading-relaxed text-slate-600">
           A playground for{" "}
@@ -41,30 +52,15 @@ export function Landing({ onOpenPlayground }: Props) {
             href="https://github.com/pinecone-io/vq-bench"
             target="_blank"
             rel="noreferrer"
-            className="text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-900"
+            className="text-[#4260f5] font-bold underline decoration-slate-300 underline-offset-2 hover:decoration-slate-900"
           >
-            vq-bench
+            VQ-Bench
           </a>
-          , the open-source benchmark for vector quantization. Pick a quantizer, set its
-          parameters, point it at some vectors, and see what the compression costs you — with
-          no install, no server, and nothing leaving your machine.
+          , the open-source benchmark for vector quantization. Run existing state-of-the-art quantizers or <span className="text-[#4260f5] font-bold">build your own!!</span>
         </p>
 
-        <div className="mt-8 space-y-5">
-          <Point title="It is really vq-bench">
-            The Rust crate is compiled to WebAssembly and called directly. Every score comes
-            from the same code the CLI runs — verified to match it exactly on identical
-            inputs. Nothing is reimplemented in JavaScript.
-          </Point>
-          <Point title="Compose your own quantizer">
-            Chain vq-bench's primitives into a pipeline of your own —{" "}
-            <span className="font-mono text-xs">center → normalize → rotate → cast_angular</span>{" "}
-            is E-RaBitQ, and composing it by hand reproduces it exactly. No recompile.
-          </Point>
-          <Point title="Bring your own vectors">
-            Drop in an <span className="font-mono text-xs">.h5</span> file and it is read in
-            the browser. Your data never leaves the device; there is no backend to send it to.
-          </Point>
+        <div className="mt-8">
+          <PipelineSlideshow pipelines={pipelines} />
         </div>
 
         <div className="mt-8 flex items-center gap-4">
@@ -175,6 +171,25 @@ export function Landing({ onOpenPlayground }: Props) {
         )}
       </section>
     </div>
+
+    <section className="mx-auto max-w-6xl px-6 pb-4">
+      <div className="grid gap-8 border-t border-slate-200 pt-8 md:grid-cols-3">
+        <Point title="It is really vq-bench">
+          The Rust crate is compiled to WebAssembly and called directly. Every score comes
+          from the same code the CLI runs — verified to match it exactly on identical
+          inputs. Nothing is reimplemented in JavaScript.
+        </Point>
+        <Point title="Compose your own quantizer">
+          Chain vq-bench's primitives into a pipeline of your own —{" "}
+          <span className="font-mono text-xs">center → normalize → rotate → cast_angular</span>{" "}
+          is E-RaBitQ, and composing it by hand reproduces it exactly. No recompile.
+        </Point>
+        <Point title="Bring your own vectors">
+          Drop in an <span className="font-mono text-xs">.h5</span> file and it is read in
+          the browser. Your data never leaves the device; there is no backend to send it to.
+        </Point>
+      </div>
+    </section>
 
     <footer className="mx-auto max-w-6xl px-6 pb-12">
       <div className="border-t border-slate-200 pt-6 text-xs text-slate-500">

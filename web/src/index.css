@@ -18,6 +18,15 @@
   --font-heading: "Gambetta", Georgia, "Times New Roman", serif;
   /* The other imported face, unused by default but ready to swap in. */
   --font-display-alt: "Gambarino", Georgia, serif;
+  /* The pipeline diagram's boxes -- its own role, so the diagram can be
+     restyled without touching body or heading text. */
+  --font-diagram: "Kalam", ui-monospace, SFMono-Regular, monospace;
+
+  /* Primitive groups, coloured as vq-bench groups them: conditioners reshape
+     the vectors, rounders are what actually quantize, splitters fan out. */
+  --stage-conditioner: #2a78d6;
+  --stage-rounder: #eb6834;
+  --stage-splitter: #1baf7a;
 
   /* Tailwind's own `font-sans` / `font-serif`, so utility classes and the
      variables cannot drift apart. */

@@ -56,6 +56,21 @@ await page.goto(URL, { waitUntil: "networkidle" });
 await page.waitForSelector("svg[role=img]", { timeout: 30000 });
 const landingSeries = await page.locator("figure ul li").allInnerTexts();
 check("landing plots the published results", landingSeries.length === 5, landingSeries.join(", "));
+// The pipeline diagram is read out of the registry, so a wrong colour or a
+// missing stage means the parse drifted from what the crate reports.
+await page.waitForSelector("ol li span", { timeout: 20000 });
+const stages = await page.locator("ol li > span").allInnerTexts();
+check("the pipeline diagram renders a chain", stages.length >= 2, stages.join(" -> "));
+check(
+  "stages are coloured by their vq-bench group",
+  await page.locator("ol li > span").last().evaluate(
+    (el) => getComputedStyle(el).color === "rgb(235, 104, 52)",
+  ),
+  "the last stage of a pipeline should be a rounder",
+);
+const dots = await page.getByRole("button", { name: /^show / }).count();
+check("the slideshow offers several pipelines", dots >= 5, `${dots} slides`);
+
 check(
   "nav links out to the project",
   (await page.locator('a[href="https://www.vq-bench.com"]').count()) > 0 &&
