@@ -17,7 +17,7 @@ export function NavBar({ view, onNavigate }: Props) {
       <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
         <button
           onClick={() => onNavigate("landing")}
-          className="text-sm font-semibold tracking-tight text-slate-900"
+          className="font-serif text-base tracking-tight text-slate-900"
         >
           VQ-bench Playground
         </button>

@@ -32,7 +32,7 @@ export function Landing({ onOpenPlayground }: Props) {
     <>
     <div className="mx-auto grid max-w-6xl gap-10 px-6 py-12 lg:grid-cols-2">
       <section>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+        <h1 className="text-4xl tracking-tight text-slate-900">
           Vector quantizers, running in your browser
         </h1>
         <p className="mt-4 text-base leading-relaxed text-slate-600">
@@ -87,7 +87,7 @@ export function Landing({ onOpenPlayground }: Props) {
 
       <section className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-medium text-slate-700">
+          <h2 className="text-base text-slate-700">
             What the benchmark found
           </h2>
           {sota && (
@@ -201,7 +201,7 @@ export function Landing({ onOpenPlayground }: Props) {
 function Point({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-sm font-medium text-slate-900">{title}</h3>
+      <h3 className="text-base text-slate-900">{title}</h3>
       <p className="mt-1 text-sm leading-relaxed text-slate-600">{children}</p>
     </div>
   );

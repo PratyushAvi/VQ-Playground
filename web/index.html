@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Fonts are linked here rather than @import-ed from the stylesheet: the
+         CSS bundler strips an @import that follows Tailwind's, which fails
+         silently (the page falls back to a system serif, or to a locally
+         installed copy on the author's own machine). Preconnect first so the
+         faces are not blocked behind a fresh TLS handshake. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://api.fontshare.com/v2/css?f%5B%5D=gambarino@400&f%5B%5D=boska@1,2&display=swap"
+    />
     <title>VQ-bench Playground</title>
   </head>
   <body>

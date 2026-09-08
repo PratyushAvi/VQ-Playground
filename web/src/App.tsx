@@ -636,7 +636,7 @@ function Playground() {
 
           {errors.length > 0 && (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-              <h2 className="text-sm font-medium text-red-800">
+              <h2 className="text-base text-red-800">
                 {errors.length === 1 ? "A problem" : `${errors.length} problems`}
               </h2>
               <ul className="mt-2 space-y-1">
@@ -790,7 +790,7 @@ function Panel({
   return (
     <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-5">
       <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="text-sm font-medium text-slate-700">{title}</h2>
+        <h2 className="text-base text-slate-700">{title}</h2>
         {aside && <span className="text-xs text-slate-400">{aside}</span>}
       </div>
       {children}
