@@ -59,7 +59,15 @@ async function fetchTyped<T>(
 }
 
 export async function loadSampleDataset(): Promise<Dataset> {
-  const meta: Meta = await fetch("data/meta.json").then((r) => r.json());
+  // Check the status before parsing. A host that answers a missing file with
+  // an HTML error page -- an SPA fallback, or a CDN's own 404 -- would
+  // otherwise surface as `JSON.parse: unexpected character`, which says
+  // nothing about the file that is actually missing.
+  const metaResponse = await fetch("data/meta.json");
+  if (!metaResponse.ok) {
+    throw new Error(`could not load data/meta.json (${metaResponse.status})`);
+  }
+  const meta: Meta = await metaResponse.json();
   const [base, evalQueries, candidates] = await Promise.all([
     fetchTyped("data/base.f32", Float32Array),
     fetchTyped("data/eval.f32", Float32Array),

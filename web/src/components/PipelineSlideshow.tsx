@@ -53,11 +53,11 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
     <div
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
-      className="rounded-lg border border-slate-200 bg-white p-6"
+      className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6"
     >
       {/* <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h2 className="text-base text-slate-900">{current.family}</h2>
-        <span className="text-xs text-slate-400">
+        <h2 className="text-base text-slate-900 dark:text-slate-100">{current.family}</h2>
+        <span className="text-xs text-slate-500 dark:text-slate-400">
           every method is a pipeline of primitives
         </span>
       </div> */}
@@ -91,7 +91,7 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
             </span>
             {i < current.stages.length - 1 && (
               <svg width="12" height="26" viewBox="0 0 12 26" aria-hidden className="my-0.5">
-                <line x1="6" y1="0" x2="6" y2="18" className="stroke-slate-300" strokeWidth="2" />
+                <line x1="6" y1="0" x2="6" y2="18" className="stroke-slate-300 dark:stroke-slate-600" strokeWidth="2" />
                 <polygon points="6,25 1.5,17 10.5,17" className="fill-slate-300" />
               </svg>
             )}
@@ -99,11 +99,11 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
         ))}
       </ol>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800 pt-3">
         {/* The colour key is only meaningful for the kinds on screen. */}
         <ul className="flex flex-wrap gap-3">
           {kinds.map((kind) => (
-            <li key={kind} className="flex items-center gap-1.5 text-xs text-slate-500">
+            <li key={kind} className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
               <span
                 aria-hidden
                 className="inline-block h-2 w-2 rounded-full"
@@ -114,17 +114,26 @@ export function PipelineSlideshow({ pipelines }: { pipelines: Pipeline[] }) {
           ))}
         </ul>
 
-        <div className="flex gap-1.5">
+        <div className="flex gap-2">
           {pipelines.map((pipeline, i) => (
             <button
               key={pipeline.key}
               onClick={() => setIndex(i)}
               aria-label={`show ${pipeline.family}`}
               aria-current={i === index}
-              className={`h-1.5 rounded-full transition-all ${
-                i === index ? "w-5 bg-slate-700" : "w-1.5 bg-slate-300 hover:bg-slate-500"
-              }`}
-            />
+              // A dot is a small target, so the button carries padding well
+              // past the mark it draws -- the hit area is the padded box, the
+              // dot is only what you see.
+              className="group -m-1 cursor-pointer p-1"
+            >
+              <span
+                className={`block h-2.5 rounded-full transition-all ${
+                  i === index
+                    ? "w-7 bg-slate-700 group-hover:bg-slate-900"
+                    : "w-2.5 bg-slate-300 group-hover:bg-slate-500"
+                }`}
+              />
+            </button>
           ))}
         </div>
       </div>

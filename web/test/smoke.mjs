@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
 // The .h5 fixtures are generated, not tracked.
@@ -145,7 +146,114 @@ await page.waitForSelector("text=/run.? on this device/", { timeout: 15000 });
 await page.reload({ waitUntil: "networkidle" });
 await page.getByRole("checkbox", { name: /^run / }).first().waitFor({ timeout: 30000 });
 const remembered = await page.locator("text=/run.? on this device/").count();
+// The guide is a view of the app, not a separate site: Quarto renders the
+// prose and only the article body is kept, so the page shares the app's head,
+// nav bar and type. Previously it was a standalone Quarto page, which meant
+// two sets of chrome to keep in step -- and Bootstrap's own root font-size
+// rescaled every rem, so the "shared" navbar came out a different height.
+{
+  const navBefore = await page.evaluate(() => {
+    const n = document.querySelector("nav");
+    return `${Math.round(n.getBoundingClientRect().height)}|${getComputedStyle(n).backgroundColor}`;
+  });
+
+  await page.getByRole("link", { name: "What are Vector Quantizers" }).click();
+  await page.waitForTimeout(400);
+
+  check(
+    "the guide is a real, linkable view",
+    page.url().endsWith("#guide"),
+    `url was ${page.url()}`,
+  );
+  check(
+    "the guide renders the Quarto prose",
+    (await page.locator(".guide-prose h1").count()) === 1 &&
+      /Vector Quantizers/.test((await page.locator(".guide-prose h1").textContent()) ?? ""),
+    "no rendered heading",
+  );
+
+  const navAfter = await page.evaluate(() => {
+    const n = document.querySelector("nav");
+    return `${Math.round(n.getBoundingClientRect().height)}|${getComputedStyle(n).backgroundColor}`;
+  });
+  // Near-tautological now that both pages render the same component -- which
+  // is the point. It stands as a guard against the guide ever going back to
+  // rendering its own chrome.
+  check(
+    "the guide wears the same nav bar as the app",
+    navBefore === navAfter,
+    `app ${navBefore} vs guide ${navAfter}`,
+  );
+  check(
+    "the guide brings no stylesheet of its own",
+    (await page.locator('link[href*="bootstrap"], link[href*="quarto"]').count()) === 0,
+    "Quarto's chrome is being served again",
+  );
+
+  // The table of contents links headings. Quarto writes those as `#<id>`,
+  // which on a hash-routed app replaces the view and drops the reader back on
+  // the landing page -- so they are namespaced as `#guide/<id>` and scrolled
+  // to by hand. Every entry must stay on the guide and reach its heading.
+  {
+    const entries = await page.locator(".guide-toc a").count();
+    let broken = null;
+    for (let i = 0; i < entries; i++) {
+      const link = page.locator(".guide-toc a").nth(i);
+      // Report the broken link rather than time out waiting for a contents
+      // list that following the previous one has already navigated away from.
+      if ((await link.count()) === 0) {
+        broken = `the contents disappeared after ${i} of ${entries} entries`;
+        break;
+      }
+      const label = (await link.textContent())?.trim();
+      await link.click();
+      await page.waitForTimeout(250);
+      const landed = await page.evaluate(() => {
+        const id = location.hash.split("/")[1];
+        const el = id && document.getElementById(id);
+        return { onGuide: !!document.querySelector(".guide-prose h1"), found: !!el };
+      });
+      if (!landed.onGuide) broken = `${label} left the guide`;
+      else if (!landed.found) broken = `${label} has no target heading`;
+    }
+    check(
+      "every contents entry stays on the guide and finds its heading",
+      broken === null,
+      broken ?? "",
+    );
+  }
+
+  await page.goto(URL + "#playground", { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+}
+
 check("runs persist across a reload", remembered === 1, "history empty after reload");
+
+// A saved run names the dataset it ran on, and opens its own results without
+// disturbing the page underneath.
+{
+  const row = page.locator("li").filter({ hasText: "random point set" }).last();
+  const text = (await row.innerText()).replace(/\s+/g, " ");
+  check(
+    "a saved run names its dataset",
+    /random point set/.test(text),
+    `row read: ${text.slice(0, 80)}`,
+  );
+
+  await row.getByRole("button").first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.waitFor({ timeout: 15000 }).catch(() => undefined);
+  check("clicking a saved run opens it", (await dialog.count()) === 1, "no dialog");
+  check(
+    "the reopened run shows its plot and table",
+    (await dialog.locator("svg").count()) > 0 && (await dialog.locator("table").count()) > 0,
+    "plot or table missing",
+  );
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check("it closes again", (await page.getByRole("dialog").count()) === 0, "dialog stuck open");
+}
 
 // Both `.h5` layouts load, and a file with neither is refused clearly.
 for (const [file, layout, truth] of [
@@ -257,11 +365,32 @@ const builtinRow = await page.locator("tbody tr").first().innerText();
 // The same quantizer, composed by hand from primitives.
 await page.getByRole("button", { name: "Compose" }).click();
 await page.waitForSelector("text=/An empty pipeline/", { timeout: 10000 });
-await page.locator("select").last().selectOption("minmax");
+const addStage = page.getByLabel("add a stage");
+await addStage.selectOption("minmax");
 await page.waitForTimeout(150);
-await page.locator("select").last().selectOption("cast_uint");
+await addStage.selectOption("cast_uint");
 await page.waitForTimeout(200);
 check("stages can be added", await page.locator("ol li").count() === 2, "expected 2 stages");
+
+// A stage param sweeps on a comma-separated list, exactly as a built-in
+// family's does. Stage params were previously passed to the primitive registry
+// as a raw array, which it rejected -- so composing a sweep was impossible.
+{
+  const b = page.getByLabel("cast_uint b");
+  await b.fill("2, 4, 6");
+  await page.waitForTimeout(600);
+  await page.getByRole("button", { name: /^Run \d+ method/ }).click();
+  await page.waitForFunction(() => document.querySelectorAll("tbody tr").length >= 3,
+    null, { timeout: 120000 }).catch(() => undefined);
+  const labels = await page.locator("tbody tr td:first-child").allInnerTexts();
+  check(
+    "a composed stage sweeps on a comma-separated list",
+    labels.length >= 3 && labels.some((l) => /b=2/.test(l)) && labels.some((l) => /b=6/.test(l)),
+    labels.join(" | "),
+  );
+  await b.fill("4");
+  await page.waitForTimeout(400);
+}
 
 await page.getByRole("button", { name: /^Run \d+ method/ }).click();
 await page.waitForSelector('tbody tr:has-text("custom")', { timeout: 120000 });
@@ -305,7 +434,10 @@ await page.waitForSelector("figure", { timeout: 20000 });
 const overlay = await page.locator("figure ul li").allInnerTexts();
 check(
   "the chart plots this run alongside earlier ones",
-  overlay.some((t) => /this run/.test(t)) && overlay.some((t) => /earlier/.test(t)),
+  // One series per quantizer family, so the legend names methods rather than
+  // lumping the run into a single "this run" line.
+  overlay.some((t) => /\(previous run\)/.test(t)) &&
+    overlay.some((t) => !/\(previous run\)/.test(t)),
   overlay.join(", "),
 );
 
@@ -329,12 +461,96 @@ check("every ranked row states the vectors it scored",
 await page.getByRole("button", { name: "chart", exact: true }).click();
 await page.waitForTimeout(300);
 
+// Both axes are selectable, and the plot can be zoomed, panned and reset.
+{
+  const y = page.getByLabel("metric on the y axis");
+  const x = page.getByLabel("metric on the x axis");
+  const offered = await y.locator("option").allInnerTexts();
+  check(
+    "both axes can be chosen from the run's own metrics",
+    (await x.count()) === 1 && offered.length >= 3 && offered.includes("bits_per_dim"),
+    `offered: ${offered.join(", ")}`,
+  );
+
+  const titles = await page.evaluate(() =>
+    [...document.querySelectorAll("figure svg text")].map((t) => t.textContent ?? ""),
+  );
+  check(
+    "the plot names both axes",
+    titles.includes(await x.inputValue()) && titles.includes(await y.inputValue()),
+    `axis titles: ${titles.filter((t) => offered.includes(t)).join(", ")}`,
+  );
+
+  // Colour and shape are keyed to the method name, so a legend entry looks the
+  // same on every chart -- an index-based palette repaints the survivors when
+  // the series list changes.
+  const marks = await page.evaluate(() =>
+    [...document.querySelectorAll("figure ul li")]
+      .map((li) => {
+        const m = li.querySelector("polygon,circle,rect");
+        return `${li.textContent.trim()}|${m?.getAttribute("fill")}|${m?.tagName}`;
+      })
+      .filter((m) => !/\(previous run\)/.test(m)),
+  );
+  check(
+    "each method gets its own colour and symbol",
+    marks.length > 1 &&
+      new Set(marks.map((m) => m.split("|").slice(1).join("|"))).size === marks.length,
+    marks.join("  "),
+  );
+
+  // Zoom by dragging a box, then reset.
+  const ticksNow = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("figure svg text")]
+        .map((t) => t.textContent)
+        .filter((t) => /^-?[\d.]+$/.test(t))
+        .join(","),
+    );
+  const fitted = await ticksNow();
+  const plot = await page.locator("figure svg").first().boundingBox();
+  await page.mouse.move(plot.x + 120, plot.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(plot.x + 330, plot.y + 190, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const zoomedTicks = await ticksNow();
+  check("dragging a box zooms the plot", zoomedTicks !== fitted, "the view did not change");
+
+  await page.getByRole("button", { name: /reset the view/ }).click();
+  await page.waitForTimeout(250);
+  check("the view resets to fit the data", (await ticksNow()) === fitted, "not restored");
+
+  // Panning must not leave the range the metrics can take.
+  await page.getByRole("button", { name: "pan", exact: true }).click();
+  for (const [dx, dy] of [[900, 700], [-900, -700]]) {
+    await page.mouse.move(plot.x + plot.width / 2, plot.y + plot.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(plot.x + plot.width / 2 + dx, plot.y + plot.height / 2 + dy, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+  }
+  const values = (await ticksNow()).split(",").map(Number).filter((n) => !Number.isNaN(n));
+  check(
+    "panning stays inside what the metrics can mean",
+    values.every((n) => n >= 0) && values.filter((n) => n <= 1.5).every((n) => n <= 1),
+    `ticks reached ${values.join(", ")}`,
+  );
+  await page.getByRole("button", { name: "zoom", exact: true }).click();
+  await page.getByRole("button", { name: /reset the view/ }).click();
+  await page.waitForTimeout(200);
+}
+
 // Earlier runs are optional; turning them off leaves only the current one.
 const earlierToggle = page.locator("label").filter({ hasText: "earlier runs" }).first();
 if (await earlierToggle.count()) await earlierToggle.locator("input").uncheck();
 await page.waitForTimeout(300);
 const alone = await page.locator("figure ul li").allInnerTexts();
-check("earlier runs can be turned off", alone.length === 1, alone.join(", "));
+check(
+  "earlier runs can be turned off",
+  alone.length > 0 && alone.every((t) => !/\(previous run\)/.test(t)),
+  alone.join(", "),
+);
 
 // And the choice survives a reload, since it is stored per browser.
 await page.reload({ waitUntil: "networkidle" });

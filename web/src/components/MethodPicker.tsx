@@ -44,10 +44,10 @@ export function MethodPicker({
     <div className="space-y-3">
       {saved.length > 0 && (
         <section>
-          <h3 className="mb-1 text-xs font-medium tracking-wide text-slate-400 uppercase">
+          <h3 className="mb-1 text-xs font-medium tracking-wide text-slate-500 dark:text-slate-400 uppercase">
             Saved
           </h3>
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {saved.map((pipeline) => (
               <li key={pipeline.name} className="flex items-center gap-2 py-1.5">
                 <input
@@ -55,18 +55,18 @@ export function MethodPicker({
                   checked={selectedSaved.includes(pipeline.name)}
                   onChange={() => onToggleSaved(pipeline.name)}
                   aria-label={`run ${pipeline.name}`}
-                  className="rounded border-slate-300"
+                  className="rounded border-slate-300 dark:border-slate-600"
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-slate-800">{pipeline.name}</p>
-                  <p className="truncate font-mono text-xs text-slate-400">
+                  <p className="truncate text-xs font-medium text-slate-800 dark:text-slate-200">{pipeline.name}</p>
+                  <p className="truncate font-mono text-xs text-slate-500 dark:text-slate-400">
                     {pipeline.stages.map((s) => s.name).join(" → ")}
                   </p>
                 </div>
                 <button
                   onClick={() => onDeleteSaved(pipeline.name)}
                   aria-label={`delete ${pipeline.name}`}
-                  className="px-1 text-xs text-slate-300 hover:text-red-700"
+                  className="px-1 text-xs text-slate-500 dark:text-slate-400 hover:text-red-700"
                 >
                   ×
                 </button>
@@ -78,11 +78,11 @@ export function MethodPicker({
 
       <section>
         {saved.length > 0 && (
-          <h3 className="mb-1 text-xs font-medium tracking-wide text-slate-400 uppercase">
+          <h3 className="mb-1 text-xs font-medium tracking-wide text-slate-500 dark:text-slate-400 uppercase">
             Built-in
           </h3>
         )}
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {quantizers.map((family) => {
             const isSelected = selected.includes(family.key);
             const isOpen = expanded === family.key;
@@ -94,16 +94,16 @@ export function MethodPicker({
                     checked={isSelected}
                     onChange={() => onToggle(family.key)}
                     aria-label={`run ${family.family}`}
-                    className="rounded border-slate-300"
+                    className="rounded border-slate-300 dark:border-slate-600"
                   />
                   <button
                     onClick={() => onExpand(isOpen ? null : family.key)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <span className="block truncate text-xs font-medium text-slate-800">
+                    <span className="block truncate text-xs font-medium text-slate-800 dark:text-slate-200">
                       {family.family}
                       {family.params.length > 0 && (
-                        <span className="ml-1.5 font-normal text-slate-400">
+                        <span className="ml-1.5 font-normal text-slate-500 dark:text-slate-400">
                           {family.params
                             .map((p) => `${p}=${params[family.key]?.[p] ?? ""}`)
                             .join(", ")}
@@ -115,7 +115,7 @@ export function MethodPicker({
                     <button
                       onClick={() => onExpand(isOpen ? null : family.key)}
                       aria-label={`${isOpen ? "hide" : "show"} ${family.family} parameters`}
-                      className="px-1 text-xs text-slate-400 hover:text-slate-800"
+                      className="cursor-pointer rounded px-1.5 py-0.5 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
                     >
                       {isOpen ? "▾" : "▸"}
                     </button>
@@ -124,11 +124,11 @@ export function MethodPicker({
 
                 {isOpen && (
                   <div className="mt-1.5 space-y-2 pl-6">
-                    <p className="font-mono text-xs leading-snug text-slate-400">
+                    <p className="font-mono text-xs leading-snug text-slate-500 dark:text-slate-400">
                       {family.describe}
                     </p>
                     {family.params.length === 0 ? (
-                      <p className="text-xs text-slate-400">No parameters.</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">No parameters.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {family.params.map((param) => {
@@ -136,15 +136,14 @@ export function MethodPicker({
                           const value = params[family.key]?.[param] ?? "";
                           return (
                             <label key={param} className="flex items-center gap-1">
-                              <span className="text-xs text-slate-500">{param}</span>
+                              <span className="text-xs text-slate-500 dark:text-slate-400">{param}</span>
                               {shape.kind === "choice" ? (
                                 <select
                                   value={value}
                                   onChange={(e) =>
                                     onParamChange(family.key, param, e.target.value)
                                   }
-                                  className="rounded border border-slate-300 bg-white px-1.5 py-0.5
-                                             text-xs focus:border-slate-500 focus:outline-none"
+                                  className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-1.5 py-0.5 text-xs focus:border-slate-500 focus:outline-none"
                                 >
                                   {shape.options.map((option) => (
                                     <option key={option} value={option}>
@@ -159,8 +158,7 @@ export function MethodPicker({
                                   onChange={(e) =>
                                     onParamChange(family.key, param, e.target.value)
                                   }
-                                  className="w-20 rounded border border-slate-300 px-1.5 py-0.5
-                                             text-xs focus:border-slate-500 focus:outline-none"
+                                  className="w-20 rounded border border-slate-300 dark:border-slate-600 px-1.5 py-0.5 text-xs focus:border-slate-500 focus:outline-none"
                                 />
                               )}
                             </label>
@@ -169,7 +167,7 @@ export function MethodPicker({
                       </div>
                     )}
                     {family.params.some((p) => shapeOf(p).kind === "int") && (
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
                         one value, or a comma-separated sweep
                       </p>
                     )}

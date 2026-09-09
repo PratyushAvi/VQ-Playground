@@ -29,6 +29,23 @@
     />
     <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f%5B%5D=gambarino@400&display=swap" />
     <title>VQ-bench Playground</title>
+    <!-- Applied before first paint: reading the choice from React would show
+         a flash of the wrong theme on every load. Kept tiny and inline for
+         that reason, and mirrors lib/theme.ts. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("vq-theme");
+          var dark =
+            saved === "dark" ||
+            ((saved === null || saved === "system") &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

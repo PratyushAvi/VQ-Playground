@@ -1,54 +1,86 @@
-// The top bar, shared by the landing page and the playground.
+// The top bar, shared by every page.
+//
+// The links and classes come from lib/nav, so the bar is defined once. The
+// site's own pages sit beside the brand; links that leave the site are ranged
+// right, which is what marks them as going elsewhere.
 
-const LINKS = [
-  { label: "vq-bench.com", href: "https://www.vq-bench.com", external: true },
-  { label: "GitHub", href: "https://github.com/pinecone-io/vq-bench", external: true },
-];
+import { ThemeToggle } from "./ThemeToggle";
+import {
+  NAV_BRAND,
+  NAV_CLASS,
+  NAV_EXTERNAL,
+  NAV_LINKS,
+  type NavLink,
+  type View,
+} from "../lib/nav";
 
 type Props = {
-  /** Which in-app view is showing; the other is offered as a link. */
-  view: "landing" | "playground";
-  onNavigate: (view: "landing" | "playground") => void;
+  /** Which in-app view is showing; the others are offered as links. */
+  view: View;
+  onNavigate: (view: View) => void;
 };
 
 export function NavBar({ view, onNavigate }: Props) {
   return (
-    <nav className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
-        <button
-          onClick={() => onNavigate("landing")}
-          className="font-serif text-base tracking-tight text-slate-900"
-        >
-          VQ-bench Playground
+    <nav className={NAV_CLASS.bar}>
+      <div className={NAV_CLASS.inner}>
+        <button onClick={() => onNavigate("landing")} className={NAV_CLASS.brand}>
+          {NAV_BRAND.label}
         </button>
 
-        <div className="flex flex-1 items-center gap-4 text-sm">
-          <button
-            onClick={() => onNavigate("playground")}
-            className={
-              view === "playground"
-                ? "font-medium text-slate-900"
-                : "text-slate-500 hover:text-slate-900"
-            }
-          >
-            Playground
-          </button>
-          {LINKS.map((link) => (
+        {/* Takes the free space, so the external group is pushed right. */}
+        <div className={NAV_CLASS.links}>
+          {NAV_LINKS.map((link) => (
+            <PageLink key={link.href} link={link} view={view} onNavigate={onNavigate} />
+          ))}
+        </div>
+
+        <div className={NAV_CLASS.external}>
+          {NAV_EXTERNAL.map((link) => (
             <a
               key={link.href}
               href={link.href}
               target="_blank"
               rel="noreferrer"
-              className="text-slate-500 hover:text-slate-900"
+              className={NAV_CLASS.link}
             >
               {link.label}
-              <span aria-hidden className="ml-0.5 text-xs text-slate-400">
+              <span aria-hidden className={NAV_CLASS.marker}>
                 ↗
               </span>
             </a>
           ))}
+          <ThemeToggle />
         </div>
       </div>
     </nav>
+  );
+}
+
+/** One of the site's own pages: a real link, switched without a reload. */
+function PageLink({
+  link,
+  view,
+  onNavigate,
+}: {
+  link: NavLink;
+  view: View;
+  onNavigate: (view: View) => void;
+}) {
+  const active = view === link.view;
+  return (
+    <a
+      href={link.href}
+      onClick={(e) => {
+        if (!link.view) return;
+        // The hash still makes it addressable; this only avoids the reload.
+        e.preventDefault();
+        onNavigate(link.view);
+      }}
+      aria-current={active ? "page" : undefined}
+      className={active ? NAV_CLASS.active : NAV_CLASS.link}
+    >
+      {link.label}
+    </a>
   );
 }

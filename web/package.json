@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "docs": "quarto render docs && node docs/extract.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "smoke": "node test/smoke.mjs"

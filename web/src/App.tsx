@@ -16,6 +16,8 @@ import { DatasetList } from "./components/DatasetList";
 import { MethodPicker } from "./components/MethodPicker";
 import { PipelineBuilder } from "./components/PipelineBuilder";
 import { ResultsTable } from "./components/ResultsTable";
+import { Guide } from "./components/Guide";
+import { RunDetail } from "./components/RunDetail";
 import { RunHistory } from "./components/RunHistory";
 import { datasetUrl, loadRegistry, loadSampleDataset } from "./lib/dataset";
 import {
@@ -49,33 +51,64 @@ const SEED = 1;
 /** Small by default: a phone could be the runtime, and a big base is slow. */
 const DEFAULT_LOAD: LoadOptions = { nBase: 10000, nEval: 100, candWidth: 100, seed: SEED };
 
-type View = "landing" | "playground";
+type View = "landing" | "playground" | "guide";
 
-function viewFromHash(): View {
-  return window.location.hash === "#playground" ? "playground" : "landing";
+const HASH: Record<string, View> = {
+  playground: "playground",
+  guide: "guide",
+};
+
+/**
+ * The view the current hash selects.
+ *
+ * A hash carries two things at once here: which view is showing, and which
+ * heading to scroll to inside it. The guide's own table of contents links to
+ * `#guide/why-quantize-at-all`, so read only the part before the slash --
+ * otherwise following one of those anchors would drop back to the landing
+ * page, the hash no longer matching any view.
+ */
+function viewFromHash(hash: string): View {
+  return HASH[hash.replace(/^#/, "").split("/")[0]] ?? "landing";
 }
 
 export default function App() {
-  const [view, setView] = useState<View>(viewFromHash);
+  const [hash, setHash] = useState(() => window.location.hash);
+  const view = viewFromHash(hash);
 
   useEffect(() => {
-    const sync = () => setView(viewFromHash());
+    const sync = () => setHash(window.location.hash);
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
 
   const navigate = useCallback((next: View) => {
-    window.location.hash = next === "playground" ? "#playground" : "";
+    window.location.hash = next === "landing" ? "" : `#${next}`;
   }, []);
 
+  // Scroll to the heading a `#guide/<id>` hash names.
+  //
+  // The browser cannot do this itself: the id it would look for is namespaced
+  // under the view, and is not in the document until React has switched to it.
+  // Keyed on the hash rather than the view, since moving between headings
+  // changes only the hash -- and deferred a frame, so the target exists.
+  useEffect(() => {
+    const anchor = hash.split("/")[1];
+    if (!anchor) {
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(anchor)?.scrollIntoView({ block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [hash]);
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <NavBar view={view} onNavigate={navigate} />
-      {view === "landing" ? (
-        <Landing onOpenPlayground={() => navigate("playground")} />
-      ) : (
-        <Playground />
-      )}
+      {view === "landing" && <Landing onOpenPlayground={() => navigate("playground")} />}
+      {view === "playground" && <Playground />}
+      {view === "guide" && <Guide />}
     </div>
   );
 }
@@ -117,6 +150,9 @@ function Playground() {
   // is drawing as the subject. Ids carry a random offset to stay unique across
   // a multi-dataset run, so they do not compare reliably against a timestamp.
   const [currentRunIds, setCurrentRunIds] = useState<number[]>([]);
+  // A saved run being read in a dialog. Separate from `results`, so opening
+  // one does not disturb the run in progress.
+  const [openRun, setOpenRun] = useState<RunRecord | null>(null);
   // Which datasets have the registered quantizers running, or already run.
   const [runningBenchmark, setRunningBenchmark] = useState<string[]>([]);
   const [benchmarkRun, setBenchmarkRun] = useState<string[]>([]);
@@ -478,6 +514,10 @@ function Playground() {
           config: configText,
           dataset: entry?.title ?? id,
           benchmarkDataset: entry?.benchmarkKey ?? null,
+          // Keyed by the row it ran on, so reopening it lands in the same
+          // panel -- with the same reference curves -- as a fresh run would.
+          datasetId: id,
+          scale: entry?.scale,
           results: rows,
           elapsedSeconds: seconds,
         });
@@ -500,15 +540,15 @@ function Playground() {
       <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
         <div className="space-y-6">
           <Panel title="Quantizer">
-            <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-0.5">
+            <div className="mb-3 flex gap-1 rounded-md bg-slate-100 dark:bg-slate-800 p-0.5">
               {(["family", "custom"] as const).map((option) => (
                 <button
                   key={option}
                   onClick={() => setMode(option)}
                   className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
                     mode === option
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-500 hover:text-slate-800"
+                      ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
                   }`}
                 >
                   {option === "family" ? "Built-in" : "Compose"}
@@ -517,11 +557,11 @@ function Playground() {
             </div>
 
             {!ready ? (
-              <p className="text-sm text-slate-500">Loading…</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
             ) : mode === "family" ? (
               <>
                 <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="text-slate-500">
+                  <span className="text-slate-500 dark:text-slate-400">
                     {methodCount} method{methodCount === 1 ? "" : "s"} selected
                   </span>
                   <span className="flex gap-2">
@@ -530,7 +570,7 @@ function Playground() {
                         setSelectedFamilies(quantizers.map((q) => q.key));
                         setSelectedSaved(saved.map((q) => q.name));
                       }}
-                      className="text-slate-500 underline hover:text-slate-900"
+                      className="text-slate-500 dark:text-slate-400 underline hover:text-slate-900 dark:hover:text-slate-100"
                     >
                       all
                     </button>
@@ -539,7 +579,7 @@ function Playground() {
                         setSelectedFamilies([]);
                         setSelectedSaved([]);
                       }}
-                      className="text-slate-500 underline hover:text-slate-900"
+                      className="text-slate-500 dark:text-slate-400 underline hover:text-slate-900 dark:hover:text-slate-100"
                     >
                       none
                     </button>
@@ -602,7 +642,7 @@ function Playground() {
               onAddFile={onAddFile}
             />
 
-            <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+            <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
               <SampleSize
                 label="n_base"
                 hint="rows"
@@ -616,7 +656,7 @@ function Playground() {
                 onChange={(nEval) => setLoadOptions((o) => ({ ...o, nEval }))}
               />
             </div>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               Applies when a dataset is first read. Rows are sampled uniformly at random,
               seeded — the same dataset and settings give the same subset.
             </p>
@@ -625,9 +665,14 @@ function Playground() {
           <Panel title="History">
             <RunHistory
               runs={runs}
+              onOpen={setOpenRun}
               onRestore={(run) => {
                 setConfigText(run.config);
-                setResults({ [`saved:${run.id}`]: run.results });
+                // Key by the row it ran on where that is known, so the panel
+                // finds the dataset and draws the right reference curves.
+                // Older records predate the field and fall back to a synthetic
+                // key, which still shows the table.
+                setResults({ [run.datasetId ?? `saved:${run.id}`]: run.results });
                 setElapsed(run.elapsedSeconds);
                 setErrors([]);
               }}
@@ -647,9 +692,13 @@ function Playground() {
           <button
             onClick={onRun}
             disabled={busy || !ready}
-            className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium
-                       text-white hover:bg-slate-700 disabled:cursor-not-allowed
-                       disabled:bg-slate-300"
+            className="w-full rounded-md border border-transparent bg-slate-900 px-4 py-2.5
+                       text-sm font-medium text-white hover:bg-slate-700
+                       disabled:cursor-not-allowed disabled:bg-slate-300
+                       dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100
+                       dark:hover:border-slate-400 dark:hover:bg-slate-700
+                       dark:disabled:border-slate-800 dark:disabled:bg-slate-900
+                       dark:disabled:text-slate-600"
           >
             {busy
               ? "Running…"
@@ -718,12 +767,11 @@ function Playground() {
           })}
           </div>
 
-          <section className="min-w-0 rounded-lg border border-slate-200 bg-white">
+          <section className="min-w-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
             <details open={configOpen} onToggle={(e) => setConfigOpen(e.currentTarget.open)}>
-              <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-slate-700
-                                  hover:text-slate-900">
+              <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100">
                 Config
-                <span className="ml-2 font-normal text-slate-400">
+                <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
                   {configOpen ? "" : "the JSON this run sends to vq-bench"}
                 </span>
               </summary>
@@ -734,6 +782,10 @@ function Playground() {
           </section>
         </div>
       </div>
+
+      {openRun && (
+        <RunDetail run={openRun} history={runs} onClose={() => setOpenRun(null)} />
+      )}
     </div>
   );
 }
@@ -761,22 +813,19 @@ function SavePipeline({
         onSave(name);
         setName("");
       }}
-      className="mt-4 flex gap-2 border-t border-slate-100 pt-3"
+      className="mt-4 flex gap-2 border-t border-slate-100 dark:border-slate-800 pt-3"
     >
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="name this pipeline"
         aria-label="pipeline name"
-        className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs
-                   focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none"
+        className="min-w-0 flex-1 rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-xs focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none"
       />
       <button
         type="submit"
         disabled={disabled || name.trim() === ""}
-        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700
-                   hover:border-slate-500 hover:text-slate-900
-                   disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-md border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:border-slate-500 dark:hover:border-slate-400 dark:hover:border-slate-500 hover:text-slate-900 dark:hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
       >
         save
       </button>
@@ -798,17 +847,16 @@ function SampleSize({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-700">
+      <span className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
         {label}
-        <span className="ml-1.5 font-normal text-slate-400">{hint}</span>
+        <span className="ml-1.5 font-normal text-slate-500 dark:text-slate-400">{hint}</span>
       </span>
       <input
         type="number"
         min={1}
         value={value}
         onChange={(e) => onChange(Math.max(1, Number(e.target.value) || 1))}
-        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm
-                   focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none"
+        className="w-full rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none"
       />
     </label>
   );
@@ -824,10 +872,10 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-5">
+    <section className="min-w-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
       <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="text-base text-slate-700">{title}</h2>
-        {aside && <span className="text-xs text-slate-400">{aside}</span>}
+        <h2 className="text-base text-slate-700 dark:text-slate-300">{title}</h2>
+        {aside && <span className="text-xs text-slate-500 dark:text-slate-400">{aside}</span>}
       </div>
       {children}
     </section>

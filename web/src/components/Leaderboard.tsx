@@ -106,11 +106,11 @@ export function Leaderboard({
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-xs">
         <thead>
-          <tr className="border-b border-slate-300 text-left">
-            <th className="w-10 py-2 pr-2 text-right font-medium text-slate-500">#</th>
+          <tr className="border-b border-slate-300 dark:border-slate-600 text-left">
+            <th className="w-10 py-2 pr-2 text-right font-medium text-slate-500 dark:text-slate-400">#</th>
             {onReproduce && <th className="w-8 py-2" />}
-            <th className="py-2 pr-4 font-medium text-slate-700">method</th>
-            <th className="py-2 pr-4 font-medium text-slate-500">vectors</th>
+            <th className="py-2 pr-4 font-medium text-slate-700 dark:text-slate-300">method</th>
+            <th className="py-2 pr-4 font-medium text-slate-500 dark:text-slate-400">vectors</th>
             <Header label="bits/dim" active={sort === "bits"} descending={descending}
                     onClick={() => toggle("bits")} />
             <Header label={`recall@${k}`} active={sort === "recall"} descending={descending}
@@ -125,11 +125,11 @@ export function Leaderboard({
             return (
               <tr
                 key={`${i}:${row.label}`}
-                className="border-b border-slate-100 last:border-0"
+                className="border-b border-slate-100 dark:border-slate-800 last:border-0"
               >
                 <td
                   className={`py-1.5 pr-2 text-right tabular-nums ${
-                    row.mine ? "font-medium text-slate-900" : "text-slate-400"
+                    row.mine ? "font-medium text-slate-900 dark:text-slate-100" : "text-slate-500 dark:text-slate-400"
                   }`}
                 >
                   {row.rank}
@@ -142,9 +142,7 @@ export function Leaderboard({
                         disabled={reproducing.includes(row.label)}
                         title={`run ${row.label} on your vectors`}
                         aria-label={`reproduce ${row.label} on your vectors`}
-                        className="rounded border border-slate-300 px-1 text-xs leading-4
-                                   text-slate-500 hover:border-slate-500 hover:text-slate-900
-                                   disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded border border-slate-300 dark:border-slate-600 px-1 text-xs leading-4 text-slate-500 dark:text-slate-400 hover:border-slate-500 dark:hover:border-slate-400 dark:hover:border-slate-500 hover:text-slate-900 dark:hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {reproducing.includes(row.label) ? "…" : "▶"}
                       </button>
@@ -152,12 +150,12 @@ export function Leaderboard({
                   </td>
                 )}
                 <td className="py-1.5 pr-4">
-                  <span className="font-medium text-slate-900">{row.label}</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{row.label}</span>
                   {/* The published figure for the same method, on the full
                       base. A reference point, not a competitor: the two were
                       measured at different scales. */}
                   {cited && (
-                    <span className="ml-2 text-slate-400">
+                    <span className="ml-2 text-slate-500 dark:text-slate-400">
                       published: {cited.recall.toFixed(3)} @ {cited.bits.toFixed(2)} bits
                       {referenceScale ? ` on ${compact(referenceScale)}` : ""}
                     </span>
@@ -165,9 +163,9 @@ export function Leaderboard({
                 </td>
                 <td className="py-1.5 pr-4 text-xs whitespace-nowrap">
                   {row.scale === null ? (
-                    <span className="text-slate-300">--</span>
+                    <span className="text-slate-500 dark:text-slate-400">--</span>
                   ) : row.scale.full ? (
-                    <span className="text-slate-400">
+                    <span className="text-slate-500 dark:text-slate-400">
                       {compact(row.scale.n)} full
                     </span>
                   ) : (
@@ -191,15 +189,15 @@ export function Leaderboard({
       </table>
 
       {published.size > 0 && (
-        <p className="mt-2 text-xs text-slate-500">
-          The <span className="text-slate-400">published</span> figures are vq-bench's own,
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          The <span className="text-slate-500 dark:text-slate-400">published</span> figures are vq-bench's own,
           measured over the full base. Your rows scored a subsample, which is an easier
           search, so the two are not directly comparable — run the registered quantizers on
           this sub-sample to compare at the same scale.
         </p>
       )}
       {rows.some((r) => r.scale && !r.scale.full) && (
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
           Rows marked <span className="rounded bg-amber-50 px-1 py-0.5 text-amber-700">sample</span>{" "}
           scored a subsample; the published rows cover the full base. A smaller base is an
           easier search, so a subsampled run usually reads higher than it would at full
@@ -229,10 +227,10 @@ function Header({
     <th className="py-2 pr-4 text-right font-medium">
       <button
         onClick={onClick}
-        className={`hover:text-slate-900 ${active ? "text-slate-900" : "text-slate-500"}`}
+        className={`hover:text-slate-900 dark:hover:text-slate-100 dark:hover:text-slate-100 ${active ? "text-slate-900 dark:text-slate-100" : "text-slate-500 dark:text-slate-400"}`}
       >
         {label}
-        <span aria-hidden className="ml-1 text-[10px] text-slate-400">
+        <span aria-hidden className="ml-1 text-xs text-slate-500 dark:text-slate-400">
           {active ? (descending ? "▼" : "▲") : "↕"}
         </span>
       </button>
@@ -244,7 +242,7 @@ function Cell({ mine, children }: { mine: boolean; children: React.ReactNode }) 
   return (
     <td
       className={`py-1.5 pr-4 text-right tabular-nums ${
-        mine ? "font-medium text-slate-900" : "text-slate-500"
+        mine ? "font-medium text-slate-900 dark:text-slate-100" : "text-slate-500 dark:text-slate-400"
       }`}
     >
       {children}

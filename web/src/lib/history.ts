@@ -29,6 +29,19 @@ export type RunRecord = {
    * one -- so a restored run can be overlaid on the right reference curves.
    */
   benchmarkDataset?: string | null;
+  /**
+   * The dataset row this ran against. Restoring keys the results by this, so a
+   * reopened run lands in the same panel a fresh one would and picks up that
+   * row's reference curves -- rather than a synthetic key nothing matches.
+   * Absent on runs stored before this was tracked.
+   */
+  datasetId?: string;
+  /**
+   * How many vectors were actually scored, against the dataset's full size.
+   * Stored with the run because it is what separates a subsampled score from a
+   * full-base one, and a restored run must not silently claim the latter.
+   */
+  scale?: { sampled: number; total: number };
   results: MethodResult[];
   elapsedSeconds: number;
 };

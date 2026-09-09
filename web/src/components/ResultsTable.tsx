@@ -86,10 +86,10 @@ export function ResultsTable({
     <div className="overflow-x-auto">
       <table className={`w-full border-collapse ${compact ? "text-xs" : "text-sm"}`}>
         <thead>
-          <tr className="border-b border-slate-300 text-left">
-            <th className="py-2 pr-6 font-medium text-slate-700">method</th>
+          <tr className="border-b border-slate-300 dark:border-slate-600 text-left">
+            <th className="py-2 pr-6 font-medium text-slate-700 dark:text-slate-300">method</th>
             {columns.map((c) => (
-              <th key={c.key} className="py-2 pr-4 text-right font-medium text-slate-700">
+              <th key={c.key} className="py-2 pr-4 text-right font-medium text-slate-700 dark:text-slate-300">
                 {c.label}
               </th>
             ))}
@@ -97,14 +97,14 @@ export function ResultsTable({
         </thead>
         <tbody>
           {results.map((row) => (
-            <tr key={row.label} className="border-b border-slate-100 last:border-0">
-              <td className={`py-2 pr-6 font-medium text-slate-900 ${compact ? "" : "min-w-48"}`}>
+            <tr key={row.label} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+              <td className={`py-2 pr-6 font-medium text-slate-900 dark:text-slate-100 ${compact ? "" : "min-w-48"}`}>
                 {row.label}
               </td>
               {columns.map((c) => (
                 <td
                   key={c.key}
-                  className="py-2 pr-4 text-right tabular-nums text-slate-600"
+                  className="py-2 pr-4 text-right tabular-nums text-slate-600 dark:text-slate-400"
                 >
                   {format(c.key, c.read(row))}
                 </td>

@@ -57,7 +57,7 @@ export function DatasetList({
 
   return (
     <div className="space-y-3">
-      <ul className="divide-y divide-slate-100">
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
         {entries.map((entry) => {
           const isSelected = selected.includes(entry.id);
           const bar = progress[entry.id];
@@ -75,17 +75,23 @@ export function DatasetList({
                   onChange={() => onToggle(entry.id)}
                   aria-label={`use ${entry.title}`}
                   title={imported ? undefined : "import this dataset first"}
-                  className="mt-0.5 rounded border-slate-300 disabled:opacity-30"
+                  className="mt-0.5 rounded border-slate-300 dark:border-slate-600 disabled:opacity-30"
                 />
                 <div className="min-w-0 flex-1">
                   <p
-                    className={`truncate text-xs font-medium ${
-                      imported ? "text-slate-800" : "text-slate-500"
+                    className={`truncate text-xs ${
+                      imported
+                        ? "font-semibold text-slate-900 dark:text-slate-100"
+                        : "font-medium text-slate-600 dark:text-slate-400"
                     }`}
                   >
                     {entry.title}
                   </p>
-                  <p className="text-xs text-slate-400">{entry.summary ?? entry.detail}</p>
+                  {/* Detail sits below its title at the same readable colour;
+                      the weight difference is what separates them. */}
+                  <p className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                    {entry.summary ?? entry.detail}
+                  </p>
                 </div>
                 {!imported && (
                   <button
@@ -94,9 +100,7 @@ export function DatasetList({
                     // downloading is no reason to refuse this one -- imports
                     // run on workers of their own.
                     disabled={inFlight}
-                    className="shrink-0 rounded border border-slate-300 px-2 py-1 text-xs
-                               text-slate-600 hover:border-slate-500 hover:text-slate-900
-                               disabled:cursor-not-allowed disabled:opacity-40"
+                    className="shrink-0 rounded border border-slate-300 dark:border-slate-600 px-2 py-1 text-xs text-slate-600 dark:text-slate-400 hover:border-slate-500 dark:hover:border-slate-400 dark:hover:border-slate-500 hover:text-slate-900 dark:hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {inFlight ? "importing…" : "import"}
                   </button>
@@ -106,7 +110,7 @@ export function DatasetList({
               {bar && (
                 <div className="mt-1.5 pl-6">
                   <div
-                    className="h-1 w-full overflow-hidden rounded-full bg-slate-100"
+                    className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
                     role="progressbar"
                     aria-valuenow={bar.total > 0 ? Math.round((bar.done / bar.total) * 100) : undefined}
                     aria-valuemin={0}
@@ -122,7 +126,7 @@ export function DatasetList({
                       }}
                     />
                   </div>
-                  <p className="mt-0.5 text-xs text-slate-400">{bar.stage}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{bar.stage}</p>
                 </div>
               )}
             </li>
@@ -133,8 +137,7 @@ export function DatasetList({
       {!dropOpen ? (
         <button
           onClick={() => setDropOpen(true)}
-          className="w-full rounded-md border border-dashed border-slate-300 px-3 py-2
-                     text-xs text-slate-500 hover:border-slate-400 hover:text-slate-800"
+          className="w-full rounded-md border border-dashed border-slate-300 dark:border-slate-600 px-3 py-2 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
         >
           + use your own .h5
         </button>
@@ -154,14 +157,14 @@ export function DatasetList({
           className={`cursor-pointer rounded-md border-2 border-dashed p-4 text-center
                       transition-colors ${
                         dragging
-                          ? "border-slate-500 bg-slate-100"
-                          : "border-slate-300 hover:border-slate-400"
+                          ? "border-slate-500 bg-slate-100 dark:bg-slate-800"
+                          : "border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500"
                       }`}
         >
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-slate-600 dark:text-slate-400">
             Drop an <span className="font-mono">.h5</span> here, or click to choose
           </p>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             base/eval or train/test layouts · stays on your device
           </p>
           <button
@@ -169,7 +172,7 @@ export function DatasetList({
               e.stopPropagation();
               setDropOpen(false);
             }}
-            className="mt-2 text-xs text-slate-400 underline hover:text-slate-700"
+            className="mt-2 text-xs text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-300"
           >
             cancel
           </button>

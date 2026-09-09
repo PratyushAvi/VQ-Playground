@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 
 import { Leaderboard } from "./Leaderboard";
 import { TradeoffChart, type Series } from "./TradeoffChart";
+import { axesOf, betterHigh, formatValue, limitOf, pick, type Axis } from "../lib/metrics";
 import { loadSota, shortName, type Sota } from "../lib/sota";
 import {
   DEFAULT_OVERLAY,
@@ -49,6 +50,21 @@ type Props = {
   compact?: boolean;
 };
 
+/**
+ * Which corner of the plot is good, for the chosen pair.
+ *
+ * Only claimed when both directions are known: a metric whose sense is not
+ * obvious gets a plain description rather than a confident, possibly wrong
+ * instruction about where to look.
+ */
+function hint(xAxis: Axis, yAxis: Axis): string {
+  const x = betterHigh(xAxis.key);
+  const y = betterHigh(yAxis.key);
+  const pair = `${yAxis.label} against ${xAxis.label}`;
+  if (x === null || y === null) return pair;
+  return `${pair} — ${y ? "up" : "down"} and to the ${x ? "right" : "left"} is better`;
+}
+
 /** The family a method label names: `MinMax (b=4)` -> `MinMax`. */
 function familyOf(label: string): string {
   return label.split(" (")[0];
@@ -73,23 +89,47 @@ function collectByFamily(
     }
   }
   return [...families.entries()].map(([family, byBits]) => ({
-    name: `${family} (earlier)`,
+    name: `${family} (previous run)`,
     points: [...byBits.values()].sort((a, b) => a.bits - b.bits),
     muted: true,
   }));
 }
 
-/** Pull `(bits, recall@k)` out of a result row, when it has both. */
-function points(results: MethodResult[], k: number) {
+/** Read the two chosen axes out of each row, keeping rows that have both. */
+function points(results: MethodResult[], xAxis: Axis, yAxis: Axis) {
   return results
     .map((row) => {
-      const recall = (row.recall as Record<string, number> | undefined)?.[String(k)];
-      return recall === undefined
+      const bits = xAxis.read(row);
+      const recall = yAxis.read(row);
+      return bits === undefined || recall === undefined
         ? null
-        : { bits: row.bits_per_dim, recall, label: row.label };
+        : { bits, recall, label: row.label };
     })
     .filter((p): p is { bits: number; recall: number; label: string } => p !== null)
     .sort((a, b) => a.bits - b.bits);
+}
+
+/**
+ * One series per quantizer family, so the legend names methods.
+ *
+ * A run usually sweeps a parameter -- `b` of 2, 4, 6 -- and those points form
+ * one family's curve. Drawing them as a single "this run" series hid which
+ * point belonged to which method; split by family, the legend does that work
+ * and the chart shows one line per quantizer.
+ */
+function byMethod(
+  rows: { bits: number; recall: number; label: string }[],
+): Series[] {
+  const families = new Map<string, { bits: number; recall: number; label: string }[]>();
+  for (const point of rows) {
+    const family = familyOf(point.label);
+    families.set(family, [...(families.get(family) ?? []), point]);
+  }
+  return [...families.entries()].map(([family, points]) => ({
+    name: family,
+    points: points.sort((a, b) => a.bits - b.bits),
+    emphasis: true,
+  }));
 }
 
 export function SotaOverlay({
@@ -107,6 +147,10 @@ export function SotaOverlay({
 }: Props) {
   const [sota, setSota] = useState<Sota | null>(null);
   const [prefs, setPrefs] = useState<OverlayPrefs | null>(null);
+  // Which metric each axis shows. Held by key rather than by object, so a
+  // choice survives the results changing under it.
+  const [xKey, setXKey] = useState<string | null>(null);
+  const [yKey, setYKey] = useState<string | null>(null);
 
   useEffect(() => {
     loadSota().then(setSota).catch(() => undefined);
@@ -132,20 +176,30 @@ export function SotaOverlay({
   const fallback = view === "table" ? "arxiv-nomic-768-normalized" : null;
   const dataset = prefs?.dataset ?? benchmarkDataset ?? fallback;
 
-  const mine = points(results, k);
+  // The axes this run's metrics offer. Defaults are the pairing the benchmark
+  // is read on -- cost against quality -- but any metric can take either axis.
+  const axes = axesOf(results);
+  const xAxis =
+    (xKey && axes.find((a) => a.key === xKey)) || pick(axes, ["bits_per_dim"]);
+  const yAxis =
+    (yKey && axes.find((a) => a.key === yKey)) ||
+    pick(axes, [`recall@${k}`, "recall@10", "recall@1"], 1);
+
+  const mine = xAxis && yAxis ? points(results, xAxis, yAxis) : [];
 
   // Earlier runs on this same dataset. Only those with points to plot, and
   // never the current one -- it is drawn separately and emphasised.
-  const past = datasetLabel
-    ? history
-        .filter((run) => run.dataset === datasetLabel)
-        .map((run) => ({ run, points: points(run.results, k) }))
-        .filter(({ points: p }) => p.length > 0)
-        .slice(0, 40)
-    : [];
-  if (mine.length === 0) {
+  const past =
+    datasetLabel && xAxis && yAxis
+      ? history
+          .filter((run) => run.dataset === datasetLabel)
+          .map((run) => ({ run, points: points(run.results, xAxis, yAxis) }))
+          .filter(({ points: p }) => p.length > 0)
+          .slice(0, 40)
+      : [];
+  if (!xAxis || !yAxis || mine.length === 0) {
     return (
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
         Run with <span className="font-mono">recall</span> in the metrics and{" "}
         <span className="font-mono">k</span> including {k} to plot against the benchmark.
       </p>
@@ -172,9 +226,7 @@ export function SotaOverlay({
         <button
           onClick={onRunBenchmarkMethods}
           disabled={runningBenchmarkMethods}
-          className="mb-3 w-full rounded-md border border-slate-300 px-3 py-2 text-xs
-                     font-medium text-slate-700 hover:border-slate-500 hover:text-slate-900
-                     disabled:cursor-not-allowed disabled:opacity-50"
+          className="mb-3 w-full rounded-md border border-slate-300 dark:border-slate-600 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:border-slate-500 dark:hover:border-slate-400 dark:hover:border-slate-500 hover:text-slate-900 dark:hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {runningBenchmarkMethods
             ? "Running registered vq-bench quantizers…"
@@ -183,15 +235,15 @@ export function SotaOverlay({
       )}
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <div className="flex gap-1 rounded-md bg-slate-100 p-0.5">
+        <div className="flex gap-1 rounded-md bg-slate-100 dark:bg-slate-800 p-0.5">
           {(["chart", "table"] as const).map((option) => (
             <button
               key={option}
               onClick={() => update({ view: option })}
               className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
                 view === option
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800"
+                  ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
               }`}
             >
               {option}
@@ -202,8 +254,7 @@ export function SotaOverlay({
           <select
             value={following || dataset === null ? "" : dataset}
             onChange={(e) => update({ dataset: e.target.value === "" ? null : e.target.value })}
-            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs
-                       focus:border-slate-500 focus:outline-none"
+            className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-xs focus:border-slate-500 focus:outline-none"
           >
             <option value="">
               {benchmarkDataset
@@ -218,18 +269,18 @@ export function SotaOverlay({
           </select>
         )}
         {past.length > 0 && (
-          <label className="flex items-center gap-1.5 text-xs text-slate-600">
+          <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
             <input
               type="checkbox"
               checked={showHistory}
               onChange={(e) => update({ history: e.target.checked })}
-              className="rounded border-slate-300"
+              className="rounded border-slate-300 dark:border-slate-600"
             />
             earlier runs ({past.length})
           </label>
         )}
         {show && following && benchmarkDataset && (
-          <span className="text-xs text-slate-400">same vectors as the benchmark</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">same vectors as the benchmark</span>
         )}
       </div>
 
@@ -244,27 +295,69 @@ export function SotaOverlay({
       ) : (
       <>
       {show && dataset === null && !compact && (
-        <p className="mb-2 text-xs text-slate-500">
+        <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
           These vectors have no published counterpart, so there is nothing to compare
           against by default. Pick a dataset above to plot its curves behind yours — the
           comparison then reads as shape against shape, not a like-for-like score.
         </p>
       )}
 
+      {/* Axis pickers. Both metrics are chosen rather than assumed: recall
+          against bits is the usual reading, but the same run also carries
+          reconstruction error and the divergence metrics. */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+        <label className="flex items-center gap-1.5">
+          <span className="font-medium text-slate-600 dark:text-slate-400">y</span>
+          <select
+            value={yAxis.key}
+            onChange={(e) => setYKey(e.target.value)}
+            aria-label="metric on the y axis"
+            className="cursor-pointer rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-1.5 py-0.5 text-xs focus:border-slate-500 focus:outline-none"
+          >
+            {axes.map((a) => (
+              <option key={a.key} value={a.key}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5">
+          <span className="font-medium text-slate-600 dark:text-slate-400">x</span>
+          <select
+            value={xAxis.key}
+            onChange={(e) => setXKey(e.target.value)}
+            aria-label="metric on the x axis"
+            className="cursor-pointer rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-1.5 py-0.5 text-xs focus:border-slate-500 focus:outline-none"
+          >
+            {axes.map((a) => (
+              <option key={a.key} value={a.key}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <TradeoffChart
-        series={[...reference, ...earlier, { name: "this run", points: mine, emphasis: true }]}
-        caption={`recall@${k} against bits per dimension — up and to the left is better`}
+        series={[...reference, ...earlier, ...byMethod(mine)]}
+        caption={hint(xAxis, yAxis)}
+        xLabel={xAxis.label}
+        yLabel={yAxis.label}
+        formatX={(v) => formatValue(xAxis.key, v)}
+        formatY={(v) => formatValue(yAxis.key, v)}
+        limitX={limitOf(xAxis.key)}
+        limitY={limitOf(yAxis.key)}
         height={compact ? 230 : 340}
       />
 
           {metricsTable && (
-            <div className="mt-5 border-t border-slate-100 pt-4">{metricsTable}</div>
+            <div className="mt-5 border-t border-slate-100 dark:border-slate-800 pt-4">{metricsTable}</div>
           )}
       </>
       )}
 
       {show && entry && view === "chart" && (
-        <p className="mt-3 text-xs leading-relaxed text-slate-500">
+        <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
           Reference curves are the published results on {shortName(dataset ?? "", entry.dim)} (
           {entry.n_base.toLocaleString()} vectors at {entry.dim}d).{" "}
           {compact ? null : benchmarkDataset === dataset ? (

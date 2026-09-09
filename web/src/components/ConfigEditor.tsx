@@ -58,7 +58,9 @@ export function ConfigEditor({ value, onChange, validate }: Props) {
             if (update.docChanged) latest.current.onChange(update.state.doc.toString());
           }),
           EditorView.theme({
-            "&": { fontSize: "12px", backgroundColor: "transparent" },
+            // Matches the app's --text-xs floor; CodeMirror sets its own size
+            // and does not inherit the utility scale.
+            "&": { fontSize: "13px", backgroundColor: "transparent" },
             ".cm-content": { fontFamily: "ui-monospace, SFMono-Regular, monospace" },
             "&.cm-focused": { outline: "none" },
             ".cm-gutters": { backgroundColor: "transparent", border: "none" },
@@ -86,8 +88,7 @@ export function ConfigEditor({ value, onChange, validate }: Props) {
   return (
     <div
       ref={host}
-      className="overflow-hidden rounded-md border border-slate-300 bg-white
-                 focus-within:border-slate-500 focus-within:ring-1 focus-within:ring-slate-500"
+      className="overflow-hidden rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 focus-within:border-slate-500 focus-within:ring-1 focus-within:ring-slate-500"
     />
   );
 }

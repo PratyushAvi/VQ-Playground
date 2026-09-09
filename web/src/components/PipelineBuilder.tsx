@@ -56,7 +56,7 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
   return (
     <div className="space-y-3">
       {stages.length === 0 && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           An empty pipeline. Add a stage below — a chain usually ends in a rounder
           (<span className="font-mono">cast_*</span> or <span className="font-mono">kmeans</span>),
           which is what actually quantizes.
@@ -67,9 +67,9 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
         {stages.map((stage, index) => {
           const spec = specOf(stage.key);
           return (
-            <li key={stage.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+            <li key={stage.id} className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-2">
               <div className="flex items-center gap-1.5">
-                <span className="w-4 text-xs text-slate-400 tabular-nums">{index + 1}</span>
+                <span className="w-4 text-xs text-slate-500 dark:text-slate-400 tabular-nums">{index + 1}</span>
                 <select
                   value={stage.key}
                   onChange={(e) => {
@@ -81,8 +81,7 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
                       ),
                     });
                   }}
-                  className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-1
-                             text-xs focus:border-slate-500 focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-xs focus:border-slate-500 focus:outline-none"
                 >
                   {primitives.map((p) => (
                     <option key={p.key} value={p.key}>
@@ -94,7 +93,7 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
                   aria-label="move stage up"
-                  className="px-1 text-xs text-slate-400 hover:text-slate-800 disabled:opacity-25"
+                  className="px-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-25"
                 >
                   ↑
                 </button>
@@ -102,21 +101,21 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
                   onClick={() => move(index, 1)}
                   disabled={index === stages.length - 1}
                   aria-label="move stage down"
-                  className="px-1 text-xs text-slate-400 hover:text-slate-800 disabled:opacity-25"
+                  className="px-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-25"
                 >
                   ↓
                 </button>
                 <button
                   onClick={() => onChange(stages.filter((s) => s.id !== stage.id))}
                   aria-label="remove stage"
-                  className="px-1 text-xs text-slate-300 hover:text-red-700"
+                  className="px-1 text-xs text-slate-500 dark:text-slate-400 hover:text-red-700"
                 >
                   ×
                 </button>
               </div>
 
               {spec && (
-                <p className="mt-1 pl-6 text-xs leading-snug text-slate-400">{spec.describe}</p>
+                <p className="mt-1 pl-6 text-xs leading-snug text-slate-500 dark:text-slate-400">{spec.describe}</p>
               )}
 
               {spec && spec.params.length > 0 && (
@@ -125,7 +124,7 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
                     const shape = shapeOf(param);
                     return (
                       <label key={param} className="flex items-center gap-1">
-                        <span className="text-xs text-slate-500">{param}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{param}</span>
                         {shape.kind === "choice" ? (
                           <select
                             value={stage.params[param] ?? ""}
@@ -134,8 +133,7 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
                                 params: { ...stage.params, [param]: e.target.value },
                               })
                             }
-                            className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs
-                                       focus:border-slate-500 focus:outline-none"
+                            className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-1.5 py-0.5 text-xs focus:border-slate-500 focus:outline-none"
                           >
                             {shape.options.map((option) => (
                               <option key={option} value={option}>
@@ -151,8 +149,14 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
                                 params: { ...stage.params, [param]: e.target.value },
                               })
                             }
-                            className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-xs
-                                       focus:border-slate-500 focus:outline-none"
+                            aria-label={`${stage.key} ${param}`}
+                            // A comma-separated list sweeps, as it does for a
+                            // built-in family, so the field has to be wide
+                            // enough to show one.
+                            title="one value, or a comma-separated sweep"
+                            className="w-24 rounded border border-slate-300 px-1.5 py-0.5 text-xs
+                                       focus:border-slate-500 focus:outline-none
+                                       dark:border-slate-600"
                           />
                         )}
                       </label>
@@ -177,8 +181,8 @@ export function PipelineBuilder({ primitives, stages, onChange }: Props) {
       <select
         value=""
         onChange={(e) => e.target.value && addStage(e.target.value)}
-        className="w-full rounded-md border border-dashed border-slate-300 bg-white px-3 py-2
-                   text-sm text-slate-600 focus:border-slate-500 focus:outline-none"
+        aria-label="add a stage"
+        className="w-full cursor-pointer rounded-md border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-600 dark:text-slate-400 focus:border-slate-500 focus:outline-none"
       >
         <option value="">+ add a stage…</option>
         {primitives.map((p) => (
